@@ -24,5 +24,5 @@ nodes:
 
 - I think I sent a bad message type to my output (single metric vs array), and I got no feedback what was wrong, just that no metrics were flowing there.
 
-
+- exchange.Metric has no way to add or change a label without copying whole metric. This makes it a little annoying to do simple relabeling. I see an attempt to make everything immutable, but I worry about the memory allocations for every step of the way.
 
