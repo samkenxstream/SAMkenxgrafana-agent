@@ -1,0 +1,13 @@
+nodes:
+  - name: generator
+    outputs:
+    - relabel
+    metric_generator:
+      spawn_interval: 10s
+  - name: relabel
+    outputs:
+    - fake
+    metric_relabel: {}
+  - name: fake
+    fake_metric_remote_write:
+      credential: {}

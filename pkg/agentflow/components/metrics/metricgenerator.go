@@ -2,6 +2,9 @@ package metrics
 
 import (
 	"fmt"
+	"math/rand"
+	"time"
+
 	"github.com/AsynkronIT/protoactor-go/actor"
 	"github.com/AsynkronIT/protoactor-go/scheduler"
 	"github.com/go-kit/kit/log"
@@ -11,8 +14,6 @@ import (
 	"github.com/grafana/agent/pkg/agentflow/types/actorstate"
 	"github.com/grafana/agent/pkg/agentflow/types/exchange"
 	"gopkg.in/yaml.v3"
-	"math/rand"
-	"time"
 )
 
 type MetricGenerator struct {
@@ -82,7 +83,7 @@ func (mg *MetricGenerator) Receive(ctx actor.Context) {
 
 func (mg *MetricGenerator) makeMetrics() []exchange.Metric {
 	metrics := make([]exchange.Metric, 0)
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 5; i++ {
 		metrics = append(metrics, exchange.NewMetric(fmt.Sprintf("gen_%d", i), rand.Float64(), time.Now(), nil))
 	}
 	return metrics

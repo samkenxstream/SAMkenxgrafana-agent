@@ -2,6 +2,7 @@ package remotewrites
 
 import (
 	"fmt"
+
 	"github.com/AsynkronIT/protoactor-go/actor"
 	"github.com/grafana/agent/pkg/agentflow/types/actorstate"
 	"github.com/grafana/agent/pkg/agentflow/types/exchange"
@@ -32,6 +33,9 @@ func (f *FakeMetric) Receive(c actor.Context) {
 		f.self = c.Self()
 	case []exchange.Metric:
 		fmt.Printf("recieved %d metrics \n", len(msg))
+		for _, m := range c.Message().([]exchange.Metric) {
+			fmt.Println(m.Name(), m.Labels())
+		}
 	}
 }
 

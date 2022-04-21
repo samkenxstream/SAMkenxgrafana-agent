@@ -1,8 +1,9 @@
 package config
 
 import (
-	"github.com/prometheus/common/model"
 	"time"
+
+	"github.com/prometheus/common/model"
 )
 
 type Config struct {
@@ -18,6 +19,7 @@ type Node struct {
 
 	MetricGenerator *MetricGenerator `yaml:"metric_generator,omitempty"`
 	MetricFilter    *MetricFilter    `yaml:"metric_filter,omitempty"`
+	Relabeler       *Relabeler       `yaml:"metric_relabel,omitempty"`
 
 	AgentLogs     *AgentLogs     `yaml:"agent_logs,omitempty"`
 	LogFileWriter *LogFileWriter `yaml:"log_file_writer,omitempty"`
@@ -47,6 +49,9 @@ type MetricFilterFilter struct {
 	Regex      string `yaml:"regex,omitempty"`
 	AddValue   string `yaml:"add_value,omitempty"`
 	AddLabel   string `yaml:"add_label,omitempty"`
+}
+
+type Relabeler struct {
 }
 
 type FakeRemoteWrite struct {
