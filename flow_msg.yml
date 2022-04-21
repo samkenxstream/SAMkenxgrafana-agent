@@ -9,5 +9,4 @@ nodes:
     - fake
     metric_relabel: {}
   - name: fake
-    fake_metric_remote_write:
-      credential: {}
+    fake_metric_remote_write: {}
