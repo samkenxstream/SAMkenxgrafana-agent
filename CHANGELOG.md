@@ -36,6 +36,8 @@ Main (unreleased)
 
 - Introduce Apache HTTP exporter integration. (@v-zhuravlev)
 
+- Configure the agent to report the use of feature flags to grafana.com. (@marctc)
+
 ### Enhancements
 
 - integrations-next: Integrations using autoscrape will now autoscrape metrics
@@ -47,9 +49,9 @@ Main (unreleased)
 
 - `extra-scrape-metrics` can now be enabled with the `--enable-features=extra-scrape-metrics` feature flag. See https://prometheus.io/docs/prometheus/2.31/feature_flags/#extra-scrape-metrics for details. (@rlankfo)
 
-### Bugfixes
 
-- Added config watcher delay to prevent race condition in cases where scraping service mode has not gracefully exited. (@mattdurham)
+- Resolved issue in v2 integrations where if an instance name was a prefix of another the route handler would fail to
+  match requests on the longer name (@mattdurham)
 
 ### Other changes
 
@@ -65,6 +67,17 @@ Main (unreleased)
 - Add extra identifying labels (`job`, `instance`, `agent_hostname`) to eventhandler integration. (@hjet)
 
 - Add `extra_labels` configuration to eventhandler integration. (@hjet)
+
+v0.24.2 (2022-05-02)
+--------------------
+
+### Bugfixes
+
+- Added configuration watcher delay to prevent race condition in cases where scraping service mode has not gracefully exited. (@mattdurham)
+
+### Other changes
+
+- Update version of node_exporter to include additional metrics for osx. (@v-zhuravlev)
 
 v0.24.1 (2022-04-14)
 --------------------
