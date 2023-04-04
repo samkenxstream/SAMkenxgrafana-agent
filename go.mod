@@ -8,7 +8,7 @@ require (
 	github.com/cloudflare/ebpf_exporter v1.2.5
 	github.com/cortexproject/cortex v1.11.0
 	github.com/davidmparrott/kafka_exporter/v2 v2.0.1
-	github.com/docker/docker v20.10.17+incompatible
+	github.com/docker/docker v20.10.24+incompatible
 	github.com/docker/go-connections v0.4.0
 	github.com/drone/envsubst/v2 v2.0.0-20210730161058-179042472c46
 	github.com/fatih/structs v1.1.0
@@ -120,6 +120,7 @@ require (
 
 require (
 	github.com/Lusitaniae/apache_exporter v0.11.1-0.20220518131644-f9522724dab4
+	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137
 	go.opentelemetry.io/collector/pdata v0.55.0
 	go.opentelemetry.io/collector/semconv v0.55.0
 )
@@ -159,7 +160,6 @@ require (
 	github.com/acomagu/bufpipe v1.0.3 // indirect
 	github.com/agext/levenshtein v1.2.1 // indirect
 	github.com/alecthomas/template v0.0.0-20190718012654-fb15b899a751 // indirect
-	github.com/alecthomas/units v0.0.0-20211218093645-b94a6e3cc137 // indirect
 	github.com/antonmedv/expr v1.9.0 // indirect
 	github.com/apache/thrift v0.16.0 // indirect
 	github.com/apparentlymart/go-textseg/v13 v13.0.0 // indirect
