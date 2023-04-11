@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/configuration/integrations/statsd-exporter-config/
 title: statsd_exporter_config
 ---
 
@@ -51,9 +49,6 @@ Full reference of options:
 
   # How frequent to truncate the WAL for this integration.
   [wal_truncate_frequency: <duration> | default = "60m"]
-
-  # Monitor the exporter itself and include those metrics in the results.
-  [include_exporter_metrics: <bool> | default = false]
 
   #
   # Exporter-specific configuration options

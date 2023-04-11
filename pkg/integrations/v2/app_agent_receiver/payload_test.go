@@ -2,7 +2,7 @@ package app_agent_receiver
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
@@ -14,7 +14,7 @@ func loadTestData(t *testing.T, file string) []byte {
 	t.Helper()
 	// Safe to disable, this is a test.
 	// nolint:gosec
-	content, err := ioutil.ReadFile(filepath.Join("testdata", file))
+	content, err := os.ReadFile(filepath.Join("testdata", file))
 	require.NoError(t, err, "expected to be able to read file")
 	require.True(t, len(content) > 0)
 	return content
@@ -59,6 +59,9 @@ func TestUnmarshalPayloadJSON(t *testing.T) {
 			OS:      "linux",
 			Mobile:  false,
 		},
+		View: View{
+			Name: "foobar",
+		},
 	}, payload.Meta)
 
 	require.Len(t, payload.Exceptions, 1)
@@ -94,4 +97,24 @@ func TestUnmarshalPayloadJSON(t *testing.T) {
 			},
 		},
 	}, payload.Logs)
+
+	require.Equal(t, []Event{
+		{
+			Name:      "click_login_button",
+			Domain:    "frontend",
+			Timestamp: now,
+			Attributes: map[string]string{
+				"foo": "bar",
+				"one": "two",
+			},
+			Trace: TraceContext{
+				TraceID: "abcd",
+				SpanID:  "def",
+			},
+		},
+		{
+			Name:      "click_reset_password_button",
+			Timestamp: now,
+		},
+	}, payload.Events)
 }

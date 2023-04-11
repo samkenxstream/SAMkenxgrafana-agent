@@ -17,6 +17,8 @@ import (
 	"github.com/grafana/loki/clients/pkg/promtail/client"
 	"github.com/grafana/loki/clients/pkg/promtail/config"
 	"github.com/grafana/loki/clients/pkg/promtail/server"
+	"github.com/grafana/loki/clients/pkg/promtail/wal"
+	"github.com/grafana/loki/pkg/tracing"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/common/version"
 )
@@ -36,20 +38,20 @@ type Logs struct {
 }
 
 // New creates and starts Loki log collection.
-func New(reg prometheus.Registerer, c *Config, l log.Logger) (*Logs, error) {
+func New(reg prometheus.Registerer, c *Config, l log.Logger, dryRun bool) (*Logs, error) {
 	logs := &Logs{
 		instances: make(map[string]*Instance),
 		reg:       reg,
 		l:         log.With(l, "component", "logs"),
 	}
-	if err := logs.ApplyConfig(c); err != nil {
+	if err := logs.ApplyConfig(c, dryRun); err != nil {
 		return nil, err
 	}
 	return logs, nil
 }
 
 // ApplyConfig updates Logs with a new Config.
-func (l *Logs) ApplyConfig(c *Config) error {
+func (l *Logs) ApplyConfig(c *Config, dryRun bool) error {
 	l.mut.Lock()
 	defer l.mut.Unlock()
 
@@ -62,7 +64,7 @@ func (l *Logs) ApplyConfig(c *Config) error {
 	for _, ic := range c.Configs {
 		// If an old instance existed, update it and move it to the new map.
 		if old, ok := l.instances[ic.Name]; ok {
-			err := old.ApplyConfig(ic)
+			err := old.ApplyConfig(ic, dryRun)
 			if err != nil {
 				return err
 			}
@@ -71,7 +73,7 @@ func (l *Logs) ApplyConfig(c *Config) error {
 			continue
 		}
 
-		inst, err := NewInstance(l.reg, ic, l.l)
+		inst, err := NewInstance(l.reg, ic, l.l, dryRun)
 		if err != nil {
 			return fmt.Errorf("unable to apply config for %s: %w", ic.Name, err)
 		}
@@ -121,14 +123,14 @@ type Instance struct {
 }
 
 // NewInstance creates and starts a Logs instance.
-func NewInstance(reg prometheus.Registerer, c *InstanceConfig, l log.Logger) (*Instance, error) {
+func NewInstance(reg prometheus.Registerer, c *InstanceConfig, l log.Logger, dryRun bool) (*Instance, error) {
 	instReg := prometheus.WrapRegistererWith(prometheus.Labels{"logs_config": c.Name}, reg)
 
 	inst := Instance{
 		reg: util.WrapWithUnregisterer(instReg),
 		log: log.With(l, "logs_config", c.Name),
 	}
-	if err := inst.ApplyConfig(c); err != nil {
+	if err := inst.ApplyConfig(c, dryRun); err != nil {
 		return nil, err
 	}
 	return &inst, nil
@@ -137,7 +139,7 @@ func NewInstance(reg prometheus.Registerer, c *InstanceConfig, l log.Logger) (*I
 // ApplyConfig will apply a new InstanceConfig. If the config hasn't changed,
 // then nothing will happen, otherwise the old Promtail will be stopped and
 // then replaced with a new one.
-func (i *Instance) ApplyConfig(c *InstanceConfig) error {
+func (i *Instance) ApplyConfig(c *InstanceConfig, dryRun bool) error {
 	i.mut.Lock()
 	defer i.mut.Unlock()
 
@@ -171,14 +173,17 @@ func (i *Instance) ApplyConfig(c *InstanceConfig) error {
 		return nil
 	}
 
-	clientMetrics := client.NewMetrics(i.reg, nil)
+	clientMetrics := client.NewMetrics(i.reg)
 	p, err := promtail.New(config.Config{
 		ServerConfig:    server.Config{Disable: true},
 		ClientConfigs:   c.ClientConfigs,
 		PositionsConfig: c.PositionsConfig,
 		ScrapeConfig:    c.ScrapeConfig,
 		TargetConfig:    c.TargetConfig,
-	}, clientMetrics, false, promtail.WithLogger(i.log), promtail.WithRegisterer(i.reg))
+		LimitsConfig:    c.LimitsConfig,
+		Tracing:         tracing.Config{Enabled: false},
+		WAL:             wal.Config{Enabled: false},
+	}, nil, clientMetrics, dryRun, promtail.WithLogger(i.log), promtail.WithRegisterer(i.reg))
 	if err != nil {
 		return fmt.Errorf("unable to create logs instance: %w", err)
 	}
@@ -215,4 +220,5 @@ func (i *Instance) Stop() {
 		i.promtail.Shutdown()
 		i.promtail = nil
 	}
+	i.reg.UnregisterAll()
 }

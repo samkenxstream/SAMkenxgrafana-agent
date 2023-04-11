@@ -72,10 +72,14 @@ spec:
     port: 9411
     protocol: TCP
     targetPort: 9411
-  - name: grafana-agent-traces-otlp
+  - name: grafana-agent-traces-otlp-grpc
     port: 4317
     protocol: TCP
     targetPort: 4317
+  - name: grafana-agent-traces-otlp-http
+    port: 4318
+    protocol: TCP
+    targetPort: 4318
   - name: grafana-agent-traces-opencensus
     port: 55678
     protocol: TCP
@@ -102,16 +106,15 @@ spec:
     spec:
       containers:
       - args:
+        - -config.expand-env=true
         - -config.file=/etc/agent/agent.yaml
         - -server.http.address=0.0.0.0:80
-        command:
-        - /bin/agent
         env:
         - name: HOSTNAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        image: grafana/agent:v0.26.1
+        image: grafana/agent:v0.32.1
         imagePullPolicy: IfNotPresent
         name: grafana-agent-traces
         ports:
@@ -133,7 +136,10 @@ spec:
           name: zipkin
           protocol: TCP
         - containerPort: 4317
-          name: otlp
+          name: otlp-grpc
+          protocol: TCP
+        - containerPort: 4318
+          name: otlp-http
           protocol: TCP
         - containerPort: 55678
           name: opencensus
@@ -141,7 +147,7 @@ spec:
         volumeMounts:
         - mountPath: /etc/agent
           name: grafana-agent-traces
-      serviceAccount: grafana-agent-traces
+      serviceAccountName: grafana-agent-traces
       volumes:
       - configMap:
           name: grafana-agent-traces

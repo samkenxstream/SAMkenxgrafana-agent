@@ -42,7 +42,7 @@ func (w *walker) walkStmts(ss []ast.Stmt) {
 
 		// Two blocks should always be separated by a blank line.
 		if _, isBlock := s.(*ast.BlockStmt); i > 0 && isBlock {
-			w.p.Write(wsNewline)
+			w.p.Write(wsFormfeed)
 			addedSpacing = true
 		}
 
@@ -100,12 +100,9 @@ func (w *walker) walkAttributeStmt(s *ast.AttributeStmt) {
 func (w *walker) walkBlockStmt(s *ast.BlockStmt) {
 	joined := strings.Join(s.Name, ".")
 
-	// TODO(rfratto): Should blocks have a oneline format if they're short or
-	// empty? e.g.: `empty_block { attr = 5 }`, `empty_block {}`
-
 	w.p.Write(
 		s.NamePos,
-		&ast.IdentifierExpr{Name: joined, NamePos: s.NamePos},
+		&ast.Ident{Name: joined, NamePos: s.NamePos},
 	)
 
 	if s.Label != "" {
@@ -113,6 +110,7 @@ func (w *walker) walkBlockStmt(s *ast.BlockStmt) {
 
 		w.p.Write(
 			wsBlank,
+			s.LabelPos,
 			&ast.LiteralExpr{Kind: token.STRING, Value: label},
 		)
 	}
@@ -120,10 +118,17 @@ func (w *walker) walkBlockStmt(s *ast.BlockStmt) {
 	w.p.Write(
 		wsBlank,
 		s.LCurlyPos, token.LCURLY, wsIndent,
-		wsNewline,
 	)
 
-	w.walkStmts(s.Body)
+	if len(s.Body) > 0 {
+		// Add a formfeed to start a new row run before writing any statements.
+		w.p.Write(wsFormfeed)
+		w.walkStmts(s.Body)
+	} else {
+		// There's no statements, but add a blank line between the left and right
+		// curly anyway.
+		w.p.Write(wsBlank)
+	}
 
 	w.p.Write(wsUnindent, s.RCurlyPos, token.RCURLY)
 }
@@ -140,7 +145,7 @@ func (w *walker) walkExpr(e ast.Expr) {
 		w.walkObjectExpr(e)
 
 	case *ast.IdentifierExpr:
-		w.p.Write(e.NamePos, e)
+		w.p.Write(e.Ident.NamePos, e.Ident)
 
 	case *ast.AccessExpr:
 		w.walkExpr(e.Value)
@@ -153,17 +158,7 @@ func (w *walker) walkExpr(e ast.Expr) {
 		w.p.Write(e.RBrackPos, token.RBRACK)
 
 	case *ast.CallExpr:
-		// TODO(rfratto): allow arguments to be on a new line
-		w.walkExpr(e.Value)
-		w.p.Write(token.LPAREN)
-		for i, arg := range e.Args {
-			w.walkExpr(arg)
-
-			if i+1 < len(e.Args) {
-				w.p.Write(token.COMMA, wsBlank)
-			}
-		}
-		w.p.Write(token.RPAREN)
+		w.walkCallExpr(e)
 
 	case *ast.UnaryExpr:
 		w.p.Write(e.KindPos, e.Kind)
@@ -199,7 +194,10 @@ func (w *walker) walkArrayExpr(e *ast.ArrayExpr) {
 		// Add a newline if this element starts on a different line than the last
 		// element ended.
 		if differentLines(prevPos, elementPos) {
-			w.p.Write(wsFormfeed, wsIndent)
+			// Indent elements inside the array on different lines. The indent is
+			// done *before* the newline to make sure comments written before the
+			// newline are indented properly.
+			w.p.Write(wsIndent, wsFormfeed)
 			addedNewline = true
 		} else if i > 0 {
 			// Make sure a space is injected before the next element if two
@@ -221,12 +219,20 @@ func (w *walker) walkArrayExpr(e *ast.ArrayExpr) {
 		}
 	}
 
+	var addedSuffixNewline bool
+
 	// If the closing bracket is on a different line than the final element,
 	// we need to add a trailing comma.
 	if len(e.Elements) > 0 && differentLines(prevPos, e.RBrackPos) {
-		w.p.Write(token.COMMA, wsFormfeed)
+		// We add an indentation here so comments after the final element are
+		// indented.
+		w.p.Write(token.COMMA, wsIndent, wsFormfeed)
+		addedSuffixNewline = true
 	}
 
+	if addedSuffixNewline {
+		w.p.Write(wsUnindent)
+	}
 	w.p.Write(e.RBrackPos, token.RBRACK)
 }
 
@@ -242,7 +248,13 @@ func (w *walker) walkObjectExpr(e *ast.ObjectExpr) {
 		// Add a newline if this element starts on a different line than the last
 		// element ended.
 		if differentLines(prevPos, elementPos) {
-			w.p.Write(wsFormfeed)
+			// We want to align the equal sign for object attributes if the previous
+			// field only crossed one line.
+			if i > 0 && nodeLines(e.Fields[i-1].Value) == 1 {
+				w.p.Write(wsNewline)
+			} else {
+				w.p.Write(wsFormfeed)
+			}
 		} else if i > 0 {
 			// Make sure a space is injected before the next element if two successive
 			// elements are on the same line.
@@ -279,6 +291,45 @@ func (w *walker) walkObjectExpr(e *ast.ObjectExpr) {
 	}
 
 	w.p.Write(wsUnindent, e.RCurlyPos, token.RCURLY)
+}
+
+func (w *walker) walkCallExpr(e *ast.CallExpr) {
+	w.walkExpr(e.Value)
+	w.p.Write(token.LPAREN)
+
+	prevPos := e.LParenPos
+
+	for i, arg := range e.Args {
+		var addedNewline bool
+
+		argPos := ast.StartPos(arg)
+
+		// Add a newline if this element starts on a different line than the last
+		// element ended.
+		if differentLines(prevPos, argPos) {
+			w.p.Write(wsFormfeed, wsIndent)
+			addedNewline = true
+		}
+
+		w.walkExpr(arg)
+		prevPos = ast.EndPos(arg)
+
+		if i+1 < len(e.Args) {
+			w.p.Write(token.COMMA, wsBlank)
+		}
+
+		if addedNewline {
+			w.p.Write(wsUnindent)
+		}
+	}
+
+	// Add a final comma if the final argument is on a different line than the
+	// right parenthesis.
+	if differentLines(prevPos, e.RParenPos) {
+		w.p.Write(token.COMMA, wsFormfeed)
+	}
+
+	w.p.Write(token.RPAREN)
 }
 
 // differentLines returns true if a and b are on different lines.

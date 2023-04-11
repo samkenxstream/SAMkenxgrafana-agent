@@ -34,14 +34,18 @@ var (
 	}, []string{"integration_name"})
 )
 
-// DefaultManagerConfig holds the default settings for integrations.
-var DefaultManagerConfig = ManagerConfig{
-	ScrapeIntegrations:        true,
-	IntegrationRestartBackoff: 5 * time.Second,
+var CurrentManagerConfig ManagerConfig = DefaultManagerConfig()
 
-	// Deprecated fields which keep their previous defaults:
-	UseHostnameLabel:     true,
-	ReplaceInstanceLabel: true,
+// DefaultManagerConfig holds the default settings for integrations.
+func DefaultManagerConfig() ManagerConfig {
+	return ManagerConfig{
+		ScrapeIntegrations:        true,
+		IntegrationRestartBackoff: 5 * time.Second,
+
+		// Deprecated fields which keep their previous defaults:
+		UseHostnameLabel:     true,
+		ReplaceInstanceLabel: true,
+	}
 }
 
 // ManagerConfig holds the configuration for all integrations.
@@ -94,7 +98,7 @@ func (c ManagerConfig) MarshalYAML() (interface{}, error) {
 
 // UnmarshalYAML implements yaml.Unmarshaler for ManagerConfig.
 func (c *ManagerConfig) UnmarshalYAML(unmarshal func(interface{}) error) error {
-	*c = DefaultManagerConfig
+	*c = DefaultManagerConfig()
 	return UnmarshalYAML(c, unmarshal)
 }
 
@@ -244,7 +248,7 @@ func (m *Manager) ApplyConfig(cfg ManagerConfig) error {
 		// is unchanged, we have nothing to do. Otherwise, we're going to recreate
 		// it with the new settings, so we'll need to stop it.
 		if p, exist := m.integrations[key]; exist {
-			if util.CompareYAML(p.cfg, ic) {
+			if util.CompareYAMLWithHook(p.cfg, ic, noScrubbedSecretsHook) {
 				continue
 			}
 			p.stop()
@@ -358,6 +362,17 @@ func (m *Manager) ApplyConfig(cfg ManagerConfig) error {
 		return fmt.Errorf("not all integrations were correctly updated")
 	}
 	return nil
+}
+
+func noScrubbedSecretsHook(in interface{}) (ok bool, out interface{}, err error) {
+	switch v := in.(type) {
+	case config_util.Secret:
+		return true, string(v), nil
+	case *config_util.URL:
+		return true, v.String(), nil
+	default:
+		return false, nil, nil
+	}
 }
 
 // integrationProcess is a running integration.

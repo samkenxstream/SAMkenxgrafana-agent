@@ -1,7 +1,6 @@
 package traces
 
 import (
-	"io/ioutil"
 	"os"
 	"sort"
 	"strings"
@@ -17,7 +16,7 @@ import (
 )
 
 func tmpFile(t *testing.T, content string) (*os.File, func()) {
-	f, err := ioutil.TempFile("", "")
+	f, err := os.CreateTemp("", "")
 	require.NoError(t, err)
 
 	_, err = f.Write([]byte(content))
@@ -101,6 +100,8 @@ exporters:
     compression: gzip
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -155,6 +156,7 @@ processors:
   batch:
     timeout: 5s
     send_batch_size: 100
+extensions: {}
 service:
   pipelines:
     traces:
@@ -192,6 +194,8 @@ exporters:
       authorization: Basic dGVzdDpwYXNzd29yZF9pbl9maWxl
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -230,6 +234,8 @@ exporters:
       authorization: Basic dGVzdDpwYXNzd29yZF9pbl9maWxl
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -262,6 +268,8 @@ exporters:
       insecure_skip_verify: true
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -295,6 +303,8 @@ exporters:
     retry_on_failure:
       max_elapsed_time: 60s
     compression: none
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -337,6 +347,8 @@ exporters:
     compression: gzip
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -401,6 +413,8 @@ exporters:
       x-some-header: Some value!
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -460,6 +474,8 @@ exporters:
     sending_queue:
       num_consumers: 15
     compression: none
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -497,6 +513,7 @@ processors:
   batch:
     timeout: 5s
     send_batch_size: 100
+extensions: {}
 service:
   pipelines:
     traces:
@@ -521,6 +538,7 @@ spanmetrics:
       default: GET
     - name: http.status_code
   metrics_instance: traces
+  dimensions_cache_size: 10000
 `,
 			expectedConfig: `
 receivers:
@@ -546,6 +564,8 @@ processors:
       - name: http.method
         default: GET
       - name: http.status_code
+    dimensions_cache_size: 10000
+extensions: {}
 service:
   pipelines:
     traces:
@@ -588,6 +608,7 @@ exporters:
 processors:
   spanmetrics:
     metrics_exporter: prometheus
+extensions: {}
 service:
   pipelines:
     traces:
@@ -624,6 +645,9 @@ receivers:
 remote_write:
   - endpoint: example.com:12345
 tail_sampling:
+  decision_wait: 11s
+  num_traces: 98765
+  expected_new_traces_per_sec: 76
   policies:
     - type: always_sample
     - type: latency
@@ -666,7 +690,9 @@ exporters:
       max_elapsed_time: 60s
 processors:
   tail_sampling:
-    decision_wait: 5s
+    decision_wait: 11s
+    num_traces: 98765
+    expected_new_traces_per_sec: 76
     policies:
       - name: always_sample/0
         type: always_sample
@@ -701,6 +727,7 @@ processors:
         type: rate_limiting
         rate_limiting:
           spans_per_second: 35
+extensions: {}
 service:
   pipelines:
     traces:
@@ -778,6 +805,7 @@ processors:
           values:
             - value1
             - value2
+extensions: {}
 service:
   pipelines:
     traces/0:
@@ -818,6 +846,7 @@ exporters:
     compression: gzip
     retry_on_failure:
       max_elapsed_time: 60s
+extensions: {}
 service:
   pipelines:
     traces:
@@ -858,6 +887,8 @@ exporters:
     compression: gzip
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -896,6 +927,8 @@ exporters:
     compression: gzip
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -935,6 +968,7 @@ processors:
     scrape_configs:
       - im_a_scrape_config
     operation_type: update
+extensions: {}
 service:
   pipelines:
     traces:
@@ -969,6 +1003,7 @@ exporters:
       max_elapsed_time: 60s
 processors:
   service_graphs:
+extensions: {}
 service:
   pipelines:
     traces:
@@ -1003,6 +1038,8 @@ exporters:
       insecure: true
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -1043,6 +1080,8 @@ exporters:
       authorization: Basic dGVzdDpwYXNzd29yZF9pbl9maWxl
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -1087,6 +1126,8 @@ exporters:
       insecure: true
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -1151,6 +1192,7 @@ exporters:
       max_elapsed_time: 60s
     auth:
       authenticator: oauth2client/otlphttp0
+processors: {}
 service:
   extensions: ["oauth2client/otlphttp0"]
   pipelines:
@@ -1208,6 +1250,7 @@ exporters:
       max_elapsed_time: 60s
     auth:
       authenticator: oauth2client/otlphttp0
+processors: {}
 service:
   extensions: ["oauth2client/otlphttp0"]
   pipelines:
@@ -1276,6 +1319,7 @@ exporters:
       max_elapsed_time: 60s
     auth:
       authenticator: oauth2client/otlp1
+processors: {}
 service:
   extensions: ["oauth2client/otlphttp0", "oauth2client/otlp1"]
   pipelines:
@@ -1330,6 +1374,7 @@ exporters:
       max_elapsed_time: 60s
     auth:
       authenticator: oauth2client/otlphttp0
+processors: {}
 service:
   extensions: ["oauth2client/otlphttp0"]
   pipelines:
@@ -1381,6 +1426,8 @@ exporters:
     compression: gzip
     retry_on_failure:
       max_elapsed_time: 60s
+processors: {}
+extensions: {}
 service:
   pipelines:
     traces:
@@ -1413,8 +1460,7 @@ service:
 			require.NoError(t, err)
 
 			configMap := confmap.NewFromStringMap(otelMapStructure)
-			cfgUnmarshaler := configunmarshaler.New()
-			expectedConfig, err := cfgUnmarshaler.Unmarshal(configMap, factories)
+			expectedConfig, err := configunmarshaler.Unmarshal(configMap, factories)
 			require.NoError(t, err)
 
 			// Exporters/Receivers/Processors in the config's service.Pipelines, as well as
@@ -1781,6 +1827,27 @@ receivers:
 	otel, err := cfg.otelConfig()
 	assert.Nil(t, err)
 	assert.Contains(t, otel.Service.Pipelines[config.NewComponentID("traces")].Receivers, config.NewComponentID(pushreceiver.TypeStr))
+}
+
+func TestUnmarshalYAMLEmptyOTLP(t *testing.T) {
+	test := `
+receivers:
+  otlp:`
+	cfg := InstanceConfig{}
+	err := yaml.Unmarshal([]byte(test), &cfg)
+	assert.NotNil(t, err)
+	require.Contains(t, err.Error(), "failed to parse OTLP receiver config: otlp")
+}
+
+func TestUnmarshalYAMLEmptyOTLPProtocols(t *testing.T) {
+	test := `
+receivers:
+  otlp:
+    protocols:`
+	cfg := InstanceConfig{}
+	err := yaml.Unmarshal([]byte(test), &cfg)
+	assert.NotNil(t, err)
+	require.Contains(t, err.Error(), "otlp receiver requires a \"protocols\" field which must be a YAML map: otlp")
 }
 
 // sortService is a helper function to lexicographically sort all

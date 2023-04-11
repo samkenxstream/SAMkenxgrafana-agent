@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/set-up/
 title: Set up Grafana Agent
 weight: 100
 ---
@@ -18,14 +16,14 @@ To get started with Grafana Agent Operator, refer to the Operator-specific
 
 ## Installation options
 
-Grafana Agent is currently distributed in plain binary form, Docker container images, a Windows installer, a Homebrew package, and a Kubernetes install script. 
+Grafana Agent is currently distributed in plain binary form, Docker container images, a Windows installer, a Homebrew package, and a Kubernetes install script.
 
 The following architectures receive active support.
 
- - macOS: Intel Mac or Apple Silicon 
- - Windows: A x64 machine 
- - Linux: AMD64, ARM64, ARMv6, or ARMv7 machines
- - FreeBSD: A AMD64 machine 
+ - macOS: Intel Mac or Apple Silicon
+ - Windows: A x64 machine
+ - Linux: AMD64 or ARM64 machines
+ - FreeBSD: A AMD64 machine
 
 In addition, best-effort support is provided for Linux: ppc64le.
 
@@ -34,7 +32,7 @@ Choose from the following platforms and installation options according to which 
 ### Kubernetes
 
 Deploy Kubernetes manifests from the [`kubernetes` directory](https://github.com/grafana/agent/tree/main/production/kubernetes).
-You can manually modify the Kubernetes manifests by downloading them. These manifests do not include Grafana Agent configuration files. 
+You can manually modify the Kubernetes manifests by downloading them. These manifests do not include Grafana Agent configuration files.
 
 For sample configuration files, refer to the Grafana Cloud Kubernetes quick start guide: https://grafana.com/docs/grafana-cloud/kubernetes/agent-k8s/.
 
@@ -44,6 +42,9 @@ Advanced users can use the Grafana Agent Operator to deploy the Grafana Agent on
 
 Refer to [Install Grafana Agent on Docker]({{< relref "./install-agent-docker.md" >}}).
 
+### Linux
+
+Refer to [Install Grafana Agent on Linux]({{< relref "./install-agent-linux.md" >}}).
 
 ### Windows
 

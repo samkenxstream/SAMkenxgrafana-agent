@@ -1,75 +1,119 @@
 package flow
 
 import (
-	"github.com/grafana/agent/component"
-	"github.com/grafana/agent/pkg/flow/logging"
-	"github.com/hashicorp/hcl/v2"
-	"github.com/hashicorp/hcl/v2/hclsyntax"
-	"github.com/rfratto/gohcl"
+	"fmt"
+	"strings"
+
+	"github.com/grafana/agent/pkg/river/ast"
+	"github.com/grafana/agent/pkg/river/diag"
+	"github.com/grafana/agent/pkg/river/parser"
+	"github.com/grafana/agent/pkg/river/vm"
 )
+
+// An Argument is an input to a Flow module.
+type Argument struct {
+	// Name of the argument.
+	Name string `river:",label"`
+
+	// Whether the Argument must be provided when evaluating the file.
+	Optional bool `river:"optional,attr,optional"`
+
+	// Description for the Argument.
+	Comment string `river:"comment,attr,optional"`
+
+	// Default value for the argument.
+	Default any `river:"default,attr,optional"`
+}
 
 // File holds the contents of a parsed Flow file.
 type File struct {
 	Name string    // File name given to ReadFile.
-	HCL  *hcl.File // Raw HCL file.
+	Node *ast.File // Raw File node.
 
-	Logging logging.Options
+	Arguments []Argument // Arguments found in the file.
 
-	// Components holds the list of raw HCL blocks describing components. The
-	// Flow controller can interpret this block.
-	Components hcl.Blocks
+	// Components holds the list of raw River AST blocks describing components.
+	// The Flow controller can interpret them.
+	Components   []*ast.BlockStmt
+	ConfigBlocks []*ast.BlockStmt
 }
 
-// ReadFile parses the HCL file specified by bb into a File. name should be the
-// name of the file used for reporting errors.
-func ReadFile(name string, bb []byte) (*File, hcl.Diagnostics) {
-	file, diags := hclsyntax.ParseConfig(bb, name, hcl.InitialPos)
-	if diags.HasErrors() {
-		return nil, diags
+// ReadFile parses the River file specified by bb into a File. name should be
+// the name of the file used for reporting errors.
+func ReadFile(name string, bb []byte) (*File, error) {
+	node, err := parser.ParseFile(name, bb)
+	if err != nil {
+		return nil, err
 	}
 
-	var root rootBlock
-	decodeDiags := gohcl.DecodeBody(file.Body, nil, &root)
-	diags = diags.Extend(decodeDiags)
-	if diags.HasErrors() {
-		return nil, diags
-	}
+	// Look for predefined non-components blocks (i.e., logging), and store
+	// everything else into a list of components.
+	//
+	// TODO(rfratto): should this code be brought into a helper somewhere? Maybe
+	// in ast?
+	var (
+		components []*ast.BlockStmt
+		configs    []*ast.BlockStmt
+		args       []Argument
 
-	blockSchema := component.RegistrySchema()
-	content, remainDiags := root.Remain.Content(blockSchema)
-	diags = diags.Extend(remainDiags)
-	if diags.HasErrors() {
-		return nil, diags
-	}
+		namedArgs = make(map[string]struct{})
+	)
 
-	if root.Logger == nil {
-		defaults := logging.DefaultOptions
-		root.Logger = &defaults
+	for _, stmt := range node.Body {
+		switch stmt := stmt.(type) {
+		case *ast.AttributeStmt:
+			return nil, diag.Diagnostic{
+				Severity: diag.SeverityLevelError,
+				StartPos: ast.StartPos(stmt.Name).Position(),
+				EndPos:   ast.EndPos(stmt.Name).Position(),
+				Message:  "unrecognized attribute " + stmt.Name.Name,
+			}
+
+		case *ast.BlockStmt:
+			fullName := strings.Join(stmt.Name, ".")
+			switch fullName {
+			case "logging":
+				configs = append(configs, stmt)
+			case "tracing":
+				configs = append(configs, stmt)
+			case "argument":
+				var arg Argument
+				if err := vm.New(stmt).Evaluate(nil, &arg); err != nil {
+					return nil, err
+				}
+
+				if _, exist := namedArgs[arg.Name]; exist {
+					return nil, diag.Diagnostic{
+						Severity: diag.SeverityLevelError,
+						StartPos: ast.StartPos(stmt).Position(),
+						EndPos:   ast.EndPos(stmt).Position(),
+						Message:  fmt.Sprintf("argument %q declared more than once", arg.Name),
+					}
+				}
+
+				args = append(args, arg)
+				namedArgs[arg.Name] = struct{}{}
+			case "export":
+				configs = append(configs, stmt)
+			default:
+				components = append(components, stmt)
+			}
+
+		default:
+			return nil, diag.Diagnostic{
+				Severity: diag.SeverityLevelError,
+				StartPos: ast.StartPos(stmt).Position(),
+				EndPos:   ast.EndPos(stmt).Position(),
+				Message:  fmt.Sprintf("unsupported statement type %T", stmt),
+			}
+		}
 	}
 
 	return &File{
-		Name:       name,
-		HCL:        file,
-		Logging:    *root.Logger,
-		Components: content.Blocks,
+		Name:         name,
+		Node:         node,
+		Arguments:    args,
+		Components:   components,
+		ConfigBlocks: configs,
 	}, nil
-}
-
-type rootBlock struct {
-	Logger *logging.Options `hcl:"logging,block"`
-
-	// TODO(rfratto): server block for TLS settings
-
-	Remain hcl.Body `hcl:",remain"`
-}
-
-var defaultRootBlock = rootBlock{}
-
-var _ gohcl.Decoder = (*rootBlock)(nil)
-
-func (rb *rootBlock) DecodeHCL(body hcl.Body, ctx *hcl.EvalContext) error {
-	*rb = defaultRootBlock
-
-	type root rootBlock
-	return gohcl.DecodeBody(body, ctx, (*root)(rb))
 }

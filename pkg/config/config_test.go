@@ -13,6 +13,7 @@ import (
 
 	"github.com/grafana/agent/pkg/metrics"
 	"github.com/grafana/agent/pkg/metrics/instance"
+	"github.com/grafana/agent/pkg/server"
 	"github.com/grafana/agent/pkg/util"
 	"github.com/prometheus/common/model"
 	promCfg "github.com/prometheus/prometheus/config"
@@ -179,7 +180,7 @@ func TestConfig_Defaults(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, metrics.DefaultConfig, c.Metrics)
-	require.Equal(t, DefaultVersionedIntegrations, c.Integrations)
+	require.Equal(t, DefaultVersionedIntegrations(), c.Integrations)
 }
 
 func TestConfig_TracesLokiValidates(t *testing.T) {
@@ -411,18 +412,18 @@ metrics:
 	var cfg Config
 	require.NoError(t, LoadBytes([]byte(cfgText), false, &cfg))
 
-	require.Equal(t, "verysecret", cfg.Metrics.ServiceConfig.KVStore.Consul.ACLToken)
-	require.Equal(t, "verysecret", cfg.Metrics.ServiceConfig.Lifecycler.RingConfig.KVStore.Consul.ACLToken)
+	require.Equal(t, "verysecret", cfg.Metrics.ServiceConfig.KVStore.Consul.ACLToken.String())
+	require.Equal(t, "verysecret", cfg.Metrics.ServiceConfig.Lifecycler.RingConfig.KVStore.Consul.ACLToken.String())
 
 	bb, err := yaml.Marshal(&cfg)
 	require.NoError(t, err)
 
 	require.False(t, strings.Contains(string(bb), "verysecret"), "secrets did not get obscured")
-	require.True(t, strings.Contains(string(bb), "<secret>"), "secrets did not get obscured properly")
+	require.True(t, strings.Contains(string(bb), "********"), "secrets did not get obscured properly")
 
 	// Re-validate that the config object has not changed
-	require.Equal(t, "verysecret", cfg.Metrics.ServiceConfig.KVStore.Consul.ACLToken)
-	require.Equal(t, "verysecret", cfg.Metrics.ServiceConfig.Lifecycler.RingConfig.KVStore.Consul.ACLToken)
+	require.Equal(t, "verysecret", cfg.Metrics.ServiceConfig.KVStore.Consul.ACLToken.String())
+	require.Equal(t, "verysecret", cfg.Metrics.ServiceConfig.Lifecycler.RingConfig.KVStore.Consul.ACLToken.String())
 }
 
 func TestConfig_RemoteWriteDefaults(t *testing.T) {
@@ -451,4 +452,79 @@ func TestLoadDynamicConfigurationExpandError(t *testing.T) {
 	err := LoadDynamicConfiguration("", true, nil)
 	assert.Error(t, err)
 	assert.True(t, strings.Contains(err.Error(), "expand var is not supported when using dynamic configuration, use gomplate env instead"))
+}
+
+func TestAgent_OmitEmptyFields(t *testing.T) {
+	var cfg Config
+	yml, err := yaml.Marshal(&cfg)
+	require.NoError(t, err)
+	require.Equal(t, "{}\n", string(yml))
+}
+
+func TestAgentManagement_MergeEffectiveConfig(t *testing.T) {
+	initialCfg := `
+server:
+  log_level: info
+logs:
+  positions_directory: /tmp
+agent_management:
+  host: "localhost"
+  basic_auth:
+    username: "initial_user"
+  protocol: "http"
+  polling_interval: "1m"
+  remote_config_cache_location: "/etc"
+  remote_configuration:
+    namespace: "new_namespace"`
+
+	remoteCfg := `
+server:
+  log_level: debug
+metrics:
+  wal_directory: /tmp
+  global:
+    scrape_interval: 5m
+integrations:
+  scrape_integrations: true
+
+agent_management:
+  host: "localhost:80"
+  basic_auth:
+    username: "new_user"
+  protocol: "http"
+  polling_interval: "10s"
+  remote_config_cache_location: "/etc"
+  remote_configuration:
+    namespace: "new_namespace"`
+
+	var ic, rc Config
+	err := LoadBytes([]byte(initialCfg), false, &ic)
+	assert.NoError(t, err)
+	err = LoadBytes([]byte(remoteCfg), false, &rc)
+	assert.NoError(t, err)
+
+	// keep a copy of the initial config's agent management block to ensure it isn't
+	// overwritten by the remote config's
+	initialAgentManagement := ic.AgentManagement
+	mergeEffectiveConfig(&ic, &rc)
+
+	// agent_management configuration should not be overwritten by the remote config
+	assert.Equal(t, initialAgentManagement, ic.AgentManagement)
+
+	// since these elements are purposefully different for the previous portion of the test,
+	// unset them before comparing the rest of the config
+	ic.AgentManagement = AgentManagementConfig{}
+	rc.AgentManagement = AgentManagementConfig{}
+
+	assert.True(t, util.CompareYAML(ic, rc))
+}
+
+func TestConfig_EmptyServerConfigFails(t *testing.T) {
+	// Since we are testing defaults via config.Load, we need a file instead of a string.
+	// This test file has an empty server stanza, we expect default values out.
+	defaultServerCfg := server.DefaultConfig()
+	logger := server.NewLogger(&defaultServerCfg)
+	fs := flag.NewFlagSet("", flag.ExitOnError)
+	_, err := Load(fs, []string{"--config.file", "./testdata/server_empty.yml"}, logger)
+	require.Error(t, err)
 }

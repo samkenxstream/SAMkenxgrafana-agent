@@ -104,12 +104,12 @@ func (r *Remote) ApplyConfig(cfg kv.Config, enable bool) error {
 	}
 
 	cli, err := kv.NewClient(cfg, GetCodec(), kv.RegistererWithKVName(r.reg, "agent_configs"), r.log)
-	// This is a hack to get a consul client, the client above has it embedded but its not exposed
+	// This is a hack to get a consul client, the client above has it embedded but it's not exposed
 	var consulClient *api.Client
 	if cfg.Store == "consul" {
 		consulClient, err = api.NewClient(&api.Config{
 			Address: cfg.Consul.Host,
-			Token:   cfg.Consul.ACLToken,
+			Token:   cfg.Consul.ACLToken.String(),
 			Scheme:  "http",
 			HttpClient: &http.Client{
 				Transport: cleanhttp.DefaultPooledTransport(),
@@ -359,6 +359,7 @@ func (r *Remote) all(ctx context.Context, keep func(key string) bool) (<-chan in
 }
 
 // allConsul is ONLY usable when consul is the keystore. This is a performance improvement in using the client directly
+//
 //	instead of the cortex multi store kv interface. That interface returns the list then each value must be retrieved
 //	individually. This returns all the keys and values in one call and works on them in memory
 func (r *Remote) allConsul(ctx context.Context, keep func(key string) bool) (<-chan instance.Config, error) {

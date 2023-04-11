@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/configuration/flags/
 title: Command-line flags
 weight: 100
 ---
@@ -10,7 +8,7 @@ weight: 100
 Command-line flags are used to configure settings of Grafana Agent which cannot
 be updated at runtime.
 
-All flags may be prefixed with either one hypen or two (i.e., both
+All flags may be prefixed with either one hyphen or two (i.e., both
 `-config.file` and `--config.file` are valid).
 
 > Note: There may be flags returned by `-help` which are not listed here; this
@@ -34,17 +32,49 @@ Valid feature names are:
 * `dynamic-config`: Enable support for [dynamic configuration]({{< relref "./dynamic-config" >}})
 * `extra-scrape-metrics`: When enabled, additional time series  are exposed for each metrics instance scrape. See [Extra scrape metrics](https://prometheus.io/docs/prometheus/latest/feature_flags/#extra-scrape-metrics).
 
-### Report use of feature flags
+## Report information usage
 
-By default, Grafana Agent sends anonymous, but uniquely-identifiable information
-of the enabled feature flags from your running Grafana Agent instance to Grafana Labs.
+By default, Grafana Agent sends anonymous, but uniquely-identifiable usage information
+from your running Grafana Agent instance to Grafana Labs.
 These statistics are sent to `stats.grafana.org`.
 
 Statistics help us better understand how Grafana Agent is used.
 This helps us prioritize features and documentation.
 
+The usage information includes the following details:
+* A randomly generated and an anonymous unique ID (UUID).
+* Timestamp of when the UID was first generated.
+* Timestamp of when the report was created (by default, every 4h).
+* Version of running Grafana Agent.
+* Operating system Grafana Agent is running on.
+* System architecture Grafana Agent is running on.
+* List of enabled feature flags.
+* List of enabled integrations.
+
+This list may change over time. All newly reported data will also be documented in the CHANGELOG.
+
 If you would like to disable the reporting, Grafana Agent provides the flag `-disable-reporting`
 to stop the reporting.
+
+## Support bundles
+Grafana Agent allows the exporting of 'support bundles' on the `/-/support`
+endpoint. Support bundles are zip files containing commonly-used information
+that provide a baseline for debugging issues with the Agent.
+
+Support bundles contain all information in plain text, so that they can be
+inspected before sharing to verify that no sensitive information has leaked.
+
+Support bundles contain the following data:
+* `agent-config.yaml` contains the current agent configuration (when the `-config.enable-read-api` flag is passed).
+* `agent-logs.txt` contains the agent logs during the bundle generation.
+* `agent-metadata.yaml` contains the agent's build version, operating system, architecture, uptime, plus a string payload defining which extra agent features have been enabled via command-line flags.
+* `agent-metrics-instances.json` and `agent-metrics-targets.json` contain the active metric subsystem instances, and the discovered scraped targets for each one.
+* `agent-logs-instances.json` contains the active logs subsystem instances.
+* `agent-metrics.txt` contains a snapshot of the agent's internal metrics.
+* The `pprof/` directory contains Go runtime profiling data (CPU, heap, goroutine, mutex, block profiles) as exported by the pprof package.
+
+To disable the endpoint that exports these support bundles, you can pass in the
+`-disable-support-bundle` command-line flag.
 
 ## Configuration file
 
@@ -87,7 +117,7 @@ The `dynamic-config` and `integrations-next` features must be enabled when
 * `-server.grpc.enable-tls`: Enable TLS for the gRPC server
 * `-server.grpc.conn-limit`: Maximum number of simultaneous gRPC connections
 * `-server.grpc.keepalive.max-connection-age` Maximum age for any gRPC connection for a graceful shutdown
-* `-server.grpc.keepalive.max-connection-age-grace` Grace period to forceibly close connections after a graceful shutdown starts
+* `-server.grpc.keepalive.max-connection-age-grace` Grace period to forcibly close connections after a graceful shutdown starts
 * `-server.grpc.keepalive.max-connection-idle` Time to wait before closing idle gRPC connections
 * `-server.grpc.keepalive.min-time-between-pings` Maximum frequency that clients may send pings at
 * `-server.grpc.keepalive.ping-without-stream-allowed` Allow clients to send pings without having a gRPC stream

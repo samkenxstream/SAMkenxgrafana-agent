@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/grafana/agent/pkg/river/internal/value"
 	"github.com/stretchr/testify/require"
@@ -35,7 +36,6 @@ func TestDecode_Numbers(t *testing.T) {
 				require.NoError(t, value.Decode(val, vPtr))
 
 				actual := reflect.ValueOf(vPtr).Elem().Interface()
-
 				require.Equal(t, expect, actual)
 			})
 		}
@@ -105,64 +105,46 @@ func TestDecode(t *testing.T) {
 	}
 }
 
-func TestDecode_EmbeddedField(t *testing.T) {
-	t.Run("Non-pointer", func(t *testing.T) {
-		type Phone struct {
-			Brand string `river:"phone_brand,attr"`
-			Year  int    `river:"phone_year,attr"`
-		}
-		type Person struct {
-			Phone
-			Name string `river:"name,attr"`
-			Age  int    `river:"age,attr"`
-		}
+// TestDecode_PreservePointer ensures that pointer addresses can be preserved
+// when decoding.
+func TestDecode_PreservePointer(t *testing.T) {
+	num := 5
+	val := value.Encode(&num)
 
-		input := value.Object(map[string]value.Value{
-			"age":         value.Int(32),
-			"phone_brand": value.String("Android"),
-			"name":        value.String("John Doe"),
-			"phone_year":  value.Int(2019),
-		})
-
-		var actual Person
-		require.NoError(t, value.Decode(input, &actual))
-
-		require.Equal(t, Person{
-			Name:  "John Doe",
-			Age:   32,
-			Phone: Phone{Brand: "Android", Year: 2019},
-		}, actual)
-	})
-
-	t.Run("Pointer", func(t *testing.T) {
-		type Phone struct {
-			Brand string `river:"phone_brand,attr"`
-			Year  int    `river:"phone_year,attr"`
-		}
-		type Person struct {
-			*Phone
-			Name string `river:"name,attr"`
-			Age  int    `river:"age,attr"`
-		}
-
-		input := value.Object(map[string]value.Value{
-			"age":         value.Int(32),
-			"phone_brand": value.String("Android"),
-			"name":        value.String("John Doe"),
-			"phone_year":  value.Int(2019),
-		})
-
-		var actual Person
-		require.NoError(t, value.Decode(input, &actual))
-
-		require.Equal(t, Person{
-			Name:  "John Doe",
-			Age:   32,
-			Phone: &Phone{Brand: "Android", Year: 2019},
-		}, actual)
-	})
+	var nump *int
+	require.NoError(t, value.Decode(val, &nump))
+	require.Equal(t, unsafe.Pointer(nump), unsafe.Pointer(&num))
 }
 
+// TestDecode_PreserveMapReference ensures that map references can be preserved
+// when decoding.
+func TestDecode_PreserveMapReference(t *testing.T) {
+	m := make(map[string]string)
+	val := value.Encode(m)
+
+	var actual map[string]string
+	require.NoError(t, value.Decode(val, &actual))
+
+	// We can't check to see if the pointers of m and actual match, but we can
+	// modify m to see if actual is also modified.
+	m["foo"] = "bar"
+	require.Equal(t, "bar", actual["foo"])
+}
+
+// TestDecode_PreserveSliceReference ensures that slice references can be
+// preserved when decoding.
+func TestDecode_PreserveSliceReference(t *testing.T) {
+	s := make([]string, 3)
+	val := value.Encode(s)
+
+	var actual []string
+	require.NoError(t, value.Decode(val, &actual))
+
+	// We can't check to see if the pointers of m and actual match, but we can
+	// modify s to see if actual is also modified.
+	s[0] = "Hello, world!"
+	require.Equal(t, "Hello, world!", actual[0])
+}
 func TestDecode_Functions(t *testing.T) {
 	val := value.Encode(func() int { return 15 })
 
@@ -179,32 +161,109 @@ func TestDecode_Capsules(t *testing.T) {
 	require.Equal(t, expect, actual)
 }
 
-// TestDecode_SliceCopy ensures that copies are made during decoding instead of
-// setting values directly.
-func TestDecode_SliceCopy(t *testing.T) {
+type ValueInterface interface{ SomeMethod() }
+
+type Value1 struct{ test string }
+
+func (c Value1) SomeMethod() {}
+
+// TestDecode_CapsuleInterface tests that we are able to decode when
+// the target `into` is an interface.
+func TestDecode_CapsuleInterface(t *testing.T) {
+	tt := []struct {
+		name     string
+		value    ValueInterface
+		expected ValueInterface
+	}{
+		{
+			name:     "Capsule to Capsule",
+			value:    Value1{test: "true"},
+			expected: Value1{test: "true"},
+		},
+		{
+			name:     "Capsule Pointer to Capsule",
+			value:    &Value1{test: "true"},
+			expected: &Value1{test: "true"},
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			var actual ValueInterface
+			require.NoError(t, value.Decode(value.Encode(tc.value), &actual))
+
+			// require.Same validates the memory address matches after Decode.
+			if reflect.TypeOf(tc.value).Kind() == reflect.Pointer {
+				require.Same(t, tc.value, actual)
+			}
+
+			// We use tc.expected to validate the properties of actual match the
+			// original tc.value properties (nothing has mutated them during the test).
+			require.Equal(t, tc.expected, actual)
+		})
+	}
+}
+
+// TestDecode_CapsulesError tests that we are unable to decode when
+// the target `into` is not an interface.
+func TestDecode_CapsulesError(t *testing.T) {
+	type Capsule1 struct{ test string }
+	type Capsule2 Capsule1
+
+	v := Capsule1{test: "true"}
+	actual := Capsule2{}
+
+	require.EqualError(t, value.Decode(value.Encode(v), &actual), `expected capsule("value_test.Capsule2"), got capsule("value_test.Capsule1")`)
+}
+
+// TestDecodeCopy_SliceCopy ensures that copies are made during decoding
+// instead of setting values directly.
+func TestDecodeCopy_SliceCopy(t *testing.T) {
 	orig := []int{1, 2, 3}
 
 	var res []int
-	require.NoError(t, value.Decode(value.Encode(orig), &res))
+	require.NoError(t, value.DecodeCopy(value.Encode(orig), &res))
 
 	res[0] = 10
 	require.Equal(t, []int{1, 2, 3}, orig, "Original slice should not have been modified")
 }
 
-// TestDecode_ArrayCopy ensures that copies are made during decoding instead of
-// setting values directly.
+// TestDecodeCopy_ArrayCopy ensures that copies are made during decoding
+// instead of setting values directly.
 func TestDecode_ArrayCopy(t *testing.T) {
 	orig := [...]int{1, 2, 3}
 
 	var res [3]int
-	require.NoError(t, value.Decode(value.Encode(orig), &res))
+	require.NoError(t, value.DecodeCopy(value.Encode(orig), &res))
 
 	res[0] = 10
 	require.Equal(t, [3]int{1, 2, 3}, orig, "Original array should not have been modified")
 }
 
 func TestDecode_CustomTypes(t *testing.T) {
-	t.Run("TextUnmarshaler", func(t *testing.T) {
+	t.Run("object to Unmarshaler", func(t *testing.T) {
+		var actual customUnmarshaler
+		require.NoError(t, value.Decode(value.Object(nil), &actual))
+		require.True(t, actual.Called, "UnmarshalRiver was not invoked")
+	})
+
+	t.Run("TextMarshaler to TextUnmarshaler", func(t *testing.T) {
+		now := time.Now()
+
+		var actual time.Time
+		require.NoError(t, value.Decode(value.Encode(now), &actual))
+		require.True(t, now.Equal(actual))
+	})
+
+	t.Run("time.Duration to time.Duration", func(t *testing.T) {
+		dur := 15 * time.Second
+
+		var actual time.Duration
+		require.NoError(t, value.Decode(value.Encode(dur), &actual))
+		require.Equal(t, dur, actual)
+	})
+
+	t.Run("string to TextUnmarshaler", func(t *testing.T) {
 		now := time.Now()
 		nowBytes, _ := now.MarshalText()
 
@@ -215,13 +274,24 @@ func TestDecode_CustomTypes(t *testing.T) {
 		require.Equal(t, nowBytes, actualBytes)
 	})
 
-	t.Run("time.Duration", func(t *testing.T) {
+	t.Run("string to time.Duration", func(t *testing.T) {
 		dur := 15 * time.Second
 
 		var actual time.Duration
 		require.NoError(t, value.Decode(value.String(dur.String()), &actual))
 		require.Equal(t, dur.String(), actual.String())
 	})
+}
+
+type customUnmarshaler struct {
+	Called bool `river:"called,attr,optional"`
+}
+
+func (cu *customUnmarshaler) UnmarshalRiver(f func(interface{}) error) error {
+	cu.Called = true
+
+	type s customUnmarshaler
+	return f((*s)(cu))
 }
 
 type textEnumType bool
@@ -368,4 +438,206 @@ func TestDecode_CustomConvert(t *testing.T) {
 		err := value.Decode(value.Encapsulate(&src), &s)
 		require.EqualError(t, err, "expected string, got capsule")
 	})
+}
+
+func TestDecode_SquashedFields(t *testing.T) {
+	type InnerStruct struct {
+		InnerField1 string `river:"inner_field_1,attr,optional"`
+		InnerField2 string `river:"inner_field_2,attr,optional"`
+	}
+
+	type OuterStruct struct {
+		OuterField1 string      `river:"outer_field_1,attr,optional"`
+		Inner       InnerStruct `river:",squash"`
+		OuterField2 string      `river:"outer_field_2,attr,optional"`
+	}
+
+	var (
+		in = map[string]string{
+			"outer_field_1": "value1",
+			"outer_field_2": "value2",
+			"inner_field_1": "value3",
+			"inner_field_2": "value4",
+		}
+		expect = OuterStruct{
+			OuterField1: "value1",
+			Inner: InnerStruct{
+				InnerField1: "value3",
+				InnerField2: "value4",
+			},
+			OuterField2: "value2",
+		}
+	)
+
+	var out OuterStruct
+	err := value.Decode(value.Encode(in), &out)
+	require.NoError(t, err)
+	require.Equal(t, expect, out)
+}
+
+func TestDecode_SquashedFields_Pointer(t *testing.T) {
+	type InnerStruct struct {
+		InnerField1 string `river:"inner_field_1,attr,optional"`
+		InnerField2 string `river:"inner_field_2,attr,optional"`
+	}
+
+	type OuterStruct struct {
+		OuterField1 string       `river:"outer_field_1,attr,optional"`
+		Inner       *InnerStruct `river:",squash"`
+		OuterField2 string       `river:"outer_field_2,attr,optional"`
+	}
+
+	var (
+		in = map[string]string{
+			"outer_field_1": "value1",
+			"outer_field_2": "value2",
+			"inner_field_1": "value3",
+			"inner_field_2": "value4",
+		}
+		expect = OuterStruct{
+			OuterField1: "value1",
+			Inner: &InnerStruct{
+				InnerField1: "value3",
+				InnerField2: "value4",
+			},
+			OuterField2: "value2",
+		}
+	)
+
+	var out OuterStruct
+	err := value.Decode(value.Encode(in), &out)
+	require.NoError(t, err)
+	require.Equal(t, expect, out)
+}
+
+func TestDecode_Slice(t *testing.T) {
+	type Block struct {
+		Attr int `river:"attr,attr"`
+	}
+
+	type Struct struct {
+		Blocks []Block `river:"block.a,block,optional"`
+	}
+
+	var (
+		in = map[string]interface{}{
+			"block": map[string]interface{}{
+				"a": []map[string]interface{}{
+					{"attr": 1},
+					{"attr": 2},
+					{"attr": 3},
+					{"attr": 4},
+				},
+			},
+		}
+		expect = Struct{
+			Blocks: []Block{
+				{Attr: 1},
+				{Attr: 2},
+				{Attr: 3},
+				{Attr: 4},
+			},
+		}
+	)
+
+	var out Struct
+	err := value.Decode(value.Encode(in), &out)
+	require.NoError(t, err)
+	require.Equal(t, expect, out)
+}
+
+func TestDecode_SquashedSlice(t *testing.T) {
+	type Block struct {
+		Attr int `river:"attr,attr"`
+	}
+
+	type InnerStruct struct {
+		BlockA Block `river:"a,block,optional"`
+		BlockB Block `river:"b,block,optional"`
+		BlockC Block `river:"c,block,optional"`
+	}
+
+	type OuterStruct struct {
+		OuterField1 string        `river:"outer_field_1,attr,optional"`
+		Inner       []InnerStruct `river:"block,enum"`
+		OuterField2 string        `river:"outer_field_2,attr,optional"`
+	}
+
+	var (
+		in = map[string]interface{}{
+			"outer_field_1": "value1",
+			"outer_field_2": "value2",
+
+			"block": []map[string]interface{}{
+				{"a": map[string]interface{}{"attr": 1}},
+				{"b": map[string]interface{}{"attr": 2}},
+				{"c": map[string]interface{}{"attr": 3}},
+				{"a": map[string]interface{}{"attr": 4}},
+			},
+		}
+		expect = OuterStruct{
+			OuterField1: "value1",
+			OuterField2: "value2",
+
+			Inner: []InnerStruct{
+				{BlockA: Block{Attr: 1}},
+				{BlockB: Block{Attr: 2}},
+				{BlockC: Block{Attr: 3}},
+				{BlockA: Block{Attr: 4}},
+			},
+		}
+	)
+
+	var out OuterStruct
+	err := value.Decode(value.Encode(in), &out)
+	require.NoError(t, err)
+	require.Equal(t, expect, out)
+}
+
+func TestDecode_SquashedSlice_Pointer(t *testing.T) {
+	type Block struct {
+		Attr int `river:"attr,attr"`
+	}
+
+	type InnerStruct struct {
+		BlockA *Block `river:"a,block,optional"`
+		BlockB *Block `river:"b,block,optional"`
+		BlockC *Block `river:"c,block,optional"`
+	}
+
+	type OuterStruct struct {
+		OuterField1 string        `river:"outer_field_1,attr,optional"`
+		Inner       []InnerStruct `river:"block,enum"`
+		OuterField2 string        `river:"outer_field_2,attr,optional"`
+	}
+
+	var (
+		in = map[string]interface{}{
+			"outer_field_1": "value1",
+			"outer_field_2": "value2",
+
+			"block": []map[string]interface{}{
+				{"a": map[string]interface{}{"attr": 1}},
+				{"b": map[string]interface{}{"attr": 2}},
+				{"c": map[string]interface{}{"attr": 3}},
+				{"a": map[string]interface{}{"attr": 4}},
+			},
+		}
+		expect = OuterStruct{
+			OuterField1: "value1",
+			OuterField2: "value2",
+
+			Inner: []InnerStruct{
+				{BlockA: &Block{Attr: 1}},
+				{BlockB: &Block{Attr: 2}},
+				{BlockC: &Block{Attr: 3}},
+				{BlockA: &Block{Attr: 4}},
+			},
+		}
+	)
+
+	var out OuterStruct
+	err := value.Decode(value.Encode(in), &out)
+	require.NoError(t, err)
+	require.Equal(t, expect, out)
 }

@@ -59,7 +59,7 @@ local _config = config._config;
             },
             annotations: {
               message: |||
-                Load balacing is experiencing {{ printf "%.2f" $value }}% errors.
+                Load balancing is experiencing {{ printf "%.2f" $value }}% errors.
               |||,
             },
           },
@@ -227,11 +227,154 @@ local _config = config._config;
           {
             alert: 'VultureFailures',
             expr: |||
-              (rate(tempo_vulture_error_total[2m]) / rate(tempo_vulture_trace_total[2m])) > 0 
+              (rate(tempo_vulture_error_total[5m]) / rate(tempo_vulture_trace_total[5m])) > 0.3
             |||,
             'for': '5m',
             annotations: {
               summary: 'Vulture {{ $labels.job }} has had failures for at least 5m',
+            },
+          },
+        ],
+      },
+      {
+        name: 'GrafanaAgentManagement',
+        rules: [
+          {
+            alert: 'AgentManagementBadAPIRequests',
+            expr: |||
+              100 * sum(rate(agent_remote_config_fetches_total{status_code="(4|5).."}[10m])) by (%(group_by_cluster)s)
+                /
+              sum(rate(agent_remote_config_fetches_total[10m])) by (%(group_by_cluster)s)
+                > 5
+            ||| % _config,
+            'for': '10m',
+            labels: {
+              severity: 'warning',
+            },
+            annotations: {
+              message: |||
+                Receiving HTTP {{ $labels.status_code }} errors from API in {{ printf "%.2f" $value }}% of cases.
+              |||,
+            },
+          },
+          {
+            alert: 'AgentManagementBadAPIRequests',
+            expr: |||
+              100 * sum(rate(agent_remote_config_fetches_total{status_code="(4|5).."}[10m])) by (%(group_by_cluster)s)
+                /
+              sum(rate(agent_remote_config_fetches_total[10m])) by (%(group_by_cluster)s)
+                > 10
+            ||| % _config,
+            'for': '10m',
+            labels: {
+              severity: 'critical',
+            },
+            annotations: {
+              message: |||
+                Receiving HTTP {{ $labels.status_code }} errors from API in {{ printf "%.2f" $value }}% of cases.
+              |||,
+            },
+          },
+          {
+            alert: 'AgentManagementRequestFailures',
+            expr: |||
+              100 * sum(rate(agent_remote_config_fetch_errors_total[10m])) by (%(group_by_cluster)s)
+                /
+              sum(rate(agent_remote_config_fetches_total[10m])) by (%(group_by_cluster)s)
+                > 5
+            ||| % _config,
+            'for': '10m',
+            labels: {
+              severity: 'warning',
+            },
+            annotations: {
+              message: |||
+                Failing to reach Agent Management API.
+              |||,
+            },
+          },
+          {
+            alert: 'AgentManagementRequestFailures',
+            expr: |||
+              100 * sum(rate(agent_remote_config_fetch_errors_total[10m])) by (%(group_by_cluster)s)
+                /
+              sum(rate(agent_remote_config_fetches_total[10m])) by (%(group_by_cluster)s)
+                > 10
+            ||| % _config,
+            'for': '10m',
+            labels: {
+              severity: 'critical',
+            },
+            annotations: {
+              message: |||
+                Failing to reach Agent Management API.
+              |||,
+            },
+          },
+          {
+            alert: 'AgentManagementInvalidAPIResponses',
+            expr: |||
+              100 * sum(rate(agent_remote_config_invalid_total{reason=~".+"}[10m])) by (%(group_by_cluster)s)
+                /
+              sum(rate(agent_remote_config_fetches_total[10m])) by (%(group_by_cluster)s)
+                > 5
+            ||| % _config,
+            'for': '10m',
+            labels: {
+              severity: 'warning',
+            },
+            annotations: {
+              message: |||
+                API is responding with {{ $labels.reason }} in {{ printf "%.2f" $value }}% of cases.
+              |||,
+            },
+          },
+          {
+            alert: 'AgentManagementInvalidAPIResponses',
+            expr: |||
+              100 * sum(rate(agent_remote_config_invalid_total{reason=~".+"}[10m])) by (%(group_by_cluster)s)
+                /
+              sum(rate(agent_remote_config_fetches_total[10m])) by (%(group_by_cluster)s)
+                > 10
+            ||| % _config,
+            'for': '10m',
+            labels: {
+              severity: 'critical',
+            },
+            annotations: {
+              message: |||
+                API is responding with {{ $labels.reason }} in {{ printf "%.2f" $value }}% of cases.
+              |||,
+            },
+          },
+          {
+            alert: 'AgentManagementFailureToReload',
+            expr: |||
+              avg_over_time(agent_config_last_load_successful[10m]) < 0.9
+            ||| % _config,
+            'for': '10m',
+            labels: {
+              severity: 'warning',
+            },
+            annotations: {
+              message: |||
+                 Instance {{ $labels.instance }} failed to successfully reload the config.
+              |||,
+            },
+          },
+          {
+            alert: 'AgentManagementFailureToReload',
+            expr: |||
+              avg_over_time(agent_config_last_load_successful[10m]) < 0.9
+            ||| % _config,
+            'for': '30m',
+            labels: {
+              severity: 'critical',
+            },
+            annotations: {
+              message: |||
+                 Instance {{ $labels.instance }} failed to successfully reload the config.
+              |||,
             },
           },
         ],

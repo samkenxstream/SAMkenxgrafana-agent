@@ -1,69 +1,90 @@
 package flow
 
 import (
-	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"path"
+	"strings"
 
-	"github.com/go-kit/log/level"
+	"github.com/grafana/agent/pkg/river/encoding"
+
+	"github.com/gorilla/mux"
 	"github.com/grafana/agent/pkg/flow/internal/controller"
-	"github.com/grafana/agent/pkg/flow/internal/dag"
-	"github.com/grafana/agent/pkg/flow/internal/graphviz"
-	"github.com/hashicorp/hcl/v2/hclsyntax"
-	"github.com/hashicorp/hcl/v2/hclwrite"
-	"github.com/rfratto/gohcl/hclfmt"
 )
 
-// GraphHandler returns an http.HandlerFunc which renders the current graph's
-// DAG as an SVG. Graphviz must be installed for this function to work.
-func (f *Flow) GraphHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		g := f.loader.Graph()
-		dot := dag.MarshalDOT(g)
+// ComponentHandler returns an http.HandlerFunc which will delegate all requests to
+// a component named by the first path segment
+func (f *Flow) ComponentHandler() http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		vars := mux.Vars(r)
+		id := vars["id"]
 
-		svgBytes, err := graphviz.Dot(dot, "svg")
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+		// find node with ID
+		var node *controller.ComponentNode
+		for _, n := range f.loader.Components() {
+			if n.ID().String() == id {
+				node = n
+				break
+			}
+		}
+		if node == nil {
+			w.WriteHeader(http.StatusNotFound)
 			return
 		}
-		_, err = io.Copy(w, bytes.NewReader(svgBytes))
-		if err != nil {
-			level.Error(f.log).Log("msg", "failed to write svg graph", "err", err)
+		// TODO: potentially cache these handlers, and invalidate on component state change.
+		handler := node.HTTPHandler()
+		if handler == nil {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		// Remove prefix from path, so each component can handle paths from their
+		// own root path.
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, path.Join(f.opts.HTTPPathPrefix, id))
+		handler.ServeHTTP(w, r)
+	}
+}
+
+// ComponentJSON returns the json representation of the flow component.
+func (f *Flow) ComponentJSON(w io.Writer, ci *ComponentInfo) error {
+	f.loadMut.RLock()
+	defer f.loadMut.RUnlock()
+
+	var foundComponent *controller.ComponentNode
+	for _, c := range f.loader.Components() {
+		if c.ID().String() == ci.ID {
+			foundComponent = c
+			break
 		}
 	}
-}
-
-// ConfigHandler returns an http.HandlerFunc which will render the most
-// recently loaded configuration file as HCL.
-func (f *Flow) ConfigHandler() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		debugInfo := r.URL.Query().Get("debug") == "1"
-		_, _ = f.configBytes(w, debugInfo)
-	}
-}
-
-// configBytes dumps the current state of the flow config as HCL.
-func (f *Flow) configBytes(w io.Writer, debugInfo bool) (n int64, err error) {
-	file := hclwrite.NewFile()
-
-	blocks := f.loader.WriteBlocks(debugInfo)
-	for _, block := range blocks {
-		var id controller.ComponentID
-		id = append(id, block.Type())
-		id = append(id, block.Labels()...)
-
-		comment := fmt.Sprintf("// Component %s:\n", id.String())
-		file.Body().AppendUnstructuredTokens(hclwrite.Tokens{
-			{Type: hclsyntax.TokenComment, Bytes: []byte(comment)},
-		})
-
-		file.Body().AppendBlock(block)
-		file.Body().AppendNewline()
+	if foundComponent == nil {
+		return fmt.Errorf("unable to find component named %q", ci.ID)
 	}
 
-	toks := file.BuildTokens(nil)
-	hclfmt.Format(toks)
+	var err error
+	args, err := encoding.ConvertRiverBodyToJSON(foundComponent.Arguments())
+	if err != nil {
+		return err
+	}
+	ci.Arguments = args
 
-	return toks.WriteTo(w)
+	exports, err := encoding.ConvertRiverBodyToJSON(foundComponent.Exports())
+	if err != nil {
+		return err
+	}
+	ci.Exports = exports
+
+	debugInfo, err := encoding.ConvertRiverBodyToJSON(foundComponent.DebugInfo())
+	if err != nil {
+		return err
+	}
+	ci.DebugInfo = debugInfo
+
+	bb, err := json.Marshal(ci)
+	if err != nil {
+		return err
+	}
+	_, err = w.Write(bb)
+	return err
 }

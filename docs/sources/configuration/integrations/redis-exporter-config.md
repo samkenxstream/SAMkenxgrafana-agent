@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/configuration/integrations/redis-exporter-config/
 title: redis_exporter_config
 ---
 
@@ -81,6 +79,10 @@ Full reference of options:
   # over redis_password.
   [redis_password_file: <string>]
 
+  # Path of a file containing a JSON object which maps Redis URIs [string] to passwords [string]
+  # (e.g. {"redis://localhost:6379": "sample_password"}).
+  [redis_password_map_file: <string>]
+
   # Namespace for the metrics.
   [namespace: <string> | default = "redis"]
 
@@ -114,7 +116,7 @@ Full reference of options:
   # Comma separated list of individual keys to export counts for.
   [count_keys: <string>]
 
-  # Path to Lua Redis script for collecting extra metrics.
+  # Comma-separated list of paths to Lua Redis scripts for collecting extra metrics.
   [script_path: <string>]
 
   # Timeout for connection to Redis instance (in Golang duration format).
@@ -134,6 +136,9 @@ Full reference of options:
 
   # Whether to scrape Tile38 specific metrics.
   [is_tile38: <bool>]
+
+  # Whether this is a redis cluster (Enable this if you need to fetch key level data on a Redis Cluster).
+  [is_cluster: <bool> | default = false]
 
   # Whether to scrape Client List specific metrics.
   [export_client_list: <bool>]

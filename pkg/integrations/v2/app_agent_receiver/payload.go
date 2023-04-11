@@ -15,6 +15,7 @@ type Payload struct {
 	Exceptions   []Exception   `json:"exceptions,omitempty"`
 	Logs         []Log         `json:"logs,omitempty"`
 	Measurements []Measurement `json:"measurements,omitempty"`
+	Events       []Event       `json:"events,omitempty"`
 	Meta         Meta          `json:"meta,omitempty"`
 	Traces       *Traces       `json:"traces,omitempty"`
 }
@@ -100,7 +101,7 @@ type Traces struct {
 
 // UnmarshalJSON unmarshals Traces model.
 func (t *Traces) UnmarshalJSON(b []byte) error {
-	unmarshaler := ptrace.NewJSONUnmarshaler()
+	unmarshaler := &ptrace.JSONUnmarshaler{}
 	td, err := unmarshaler.UnmarshalTraces(b)
 	if err != nil {
 		return err
@@ -111,7 +112,7 @@ func (t *Traces) UnmarshalJSON(b []byte) error {
 
 // MarshalJSON marshals Traces model to json.
 func (t Traces) MarshalJSON() ([]byte, error) {
-	marshaler := ptrace.NewJSONMarshaler()
+	marshaler := &ptrace.JSONMarshaler{}
 	return marshaler.MarshalTraces(t.Traces)
 }
 
@@ -284,9 +285,10 @@ type Meta struct {
 	Session Session `json:"session,omitempty"`
 	Page    Page    `json:"page,omitempty"`
 	Browser Browser `json:"browser,omitempty"`
+	View    View    `json:"view,omitempty"`
 }
 
-// KeyVal produces key->value representation of the app event metadatga
+// KeyVal produces key->value representation of the app event metadata
 func (m Meta) KeyVal() *KeyVal {
 	kv := NewKeyVal()
 	MergeKeyValWithPrefix(kv, m.SDK.KeyVal(), "sdk_")
@@ -295,6 +297,7 @@ func (m Meta) KeyVal() *KeyVal {
 	MergeKeyValWithPrefix(kv, m.Session.KeyVal(), "session_")
 	MergeKeyValWithPrefix(kv, m.Page.KeyVal(), "page_")
 	MergeKeyValWithPrefix(kv, m.Browser.KeyVal(), "browser_")
+	MergeKeyValWithPrefix(kv, m.View.KeyVal(), "view_")
 	return kv
 }
 
@@ -336,6 +339,29 @@ type App struct {
 	Environment string `json:"environment,omitempty"`
 }
 
+// Event holds RUM event data
+type Event struct {
+	Name       string            `json:"name"`
+	Domain     string            `json:"domain,omitempty"`
+	Attributes map[string]string `json:"attributes,omitempty"`
+	Timestamp  time.Time         `json:"timestamp,omitempty"`
+	Trace      TraceContext      `json:"trace,omitempty"`
+}
+
+// KeyVal produces key -> value representation of Event metadata
+func (e Event) KeyVal() *KeyVal {
+	kv := NewKeyVal()
+	KeyValAdd(kv, "timestamp", e.Timestamp.String())
+	KeyValAdd(kv, "kind", "event")
+	KeyValAdd(kv, "event_name", e.Name)
+	KeyValAdd(kv, "event_domain", e.Domain)
+	if e.Attributes != nil {
+		MergeKeyValWithPrefix(kv, KeyValFromMap(e.Attributes), "event_data_")
+	}
+	MergeKeyVal(kv, e.Trace.KeyVal())
+	return kv
+}
+
 // KeyVal produces key-> value representation of App metadata
 func (a App) KeyVal() *KeyVal {
 	kv := NewKeyVal()
@@ -361,5 +387,16 @@ func (b Browser) KeyVal() *KeyVal {
 	KeyValAdd(kv, "version", b.Version)
 	KeyValAdd(kv, "os", b.OS)
 	KeyValAdd(kv, "mobile", fmt.Sprintf("%v", b.Mobile))
+	return kv
+}
+
+// View holds metadata about a view
+type View struct {
+	Name string `json:"name,omitempty"`
+}
+
+func (v View) KeyVal() *KeyVal {
+	kv := NewKeyVal()
+	KeyValAdd(kv, "name", v.Name)
 	return kv
 }

@@ -145,7 +145,7 @@ func (s *Scraper) ApplyConfig(jobs []*ScrapeConfig) error {
 		}
 	}
 
-	// Garbage collect: if if there's a key in s.scrapers that wasn't in
+	// Garbage collect: If there's a key in s.scrapers that wasn't in
 	// shardedJobs, stop that unused scraper.
 	for instance, is := range s.iscrapers {
 		_, current := shardedJobs[instance]
@@ -209,7 +209,10 @@ func newInstanceScraper(
 
 	sdOpts := []func(*discovery.Manager){
 		discovery.Name("autoscraper/" + instanceName),
-		discovery.DialContextFunc(dialerFunc),
+		discovery.HTTPClientOptions(
+			// If dialerFunc is nil, scrape.NewManager will use Go's default dialer.
+			config_util.WithDialContextFunc(dialerFunc),
+		),
 	}
 	sd := discovery.NewManager(ctx, l, sdOpts...)
 	sm := scrape.NewManager(&scrape.Options{

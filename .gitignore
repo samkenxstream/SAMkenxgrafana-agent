@@ -10,10 +10,11 @@ data-agent
 
 /cmd/agent/agent
 /cmd/agentctl/agentctl
-/cmd/agentflow/agentflow
 /cmd/agent-operator/agent-operator
 /cmd/grafana-agent-crow/grafana-agent-crow
+/build/
 /dist/
+/dist.temp/
 /packaging/windows/LICENSE
 /packaging/windows/agent-windows-amd64.exe
 
@@ -21,3 +22,4 @@ data-agent
 buildx-v*
 cover*.out
 .uptodate
+node_modules

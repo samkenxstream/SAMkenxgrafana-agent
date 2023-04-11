@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/configuration/integrations/integrations-next/snmp-config/
 title: snmp_exporter_config
 ---
 
@@ -70,7 +68,7 @@ metrics:
 integrations:
   snmp:
     autoscrape:
-      enabled: false # set autoscrape to off
+      enable: false # set autoscrape to off
     walk_params:
       private:
         version: 2
@@ -155,7 +153,7 @@ Full reference of options:
   [max_repetitions: <int> | default = 25]
 
   # How many times to retry a failed request, defaults to 3.
-  [retries: <int> | default = 25]
+  [retries: <int> | default = 3]
 
   # Timeout for each SNMP request, defaults to 5s.
   [timeout: <duration> | default = 5s]

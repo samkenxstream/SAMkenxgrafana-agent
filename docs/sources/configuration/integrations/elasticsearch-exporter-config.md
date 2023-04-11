@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/configuration/integrations/elasticsearch-exporter-config/
 title: elasticsearch_exporter_config
 ---
 
@@ -58,9 +56,6 @@ Full reference of options:
   # How frequent to truncate the WAL for this integration.
   [wal_truncate_frequency: <duration> | default = "60m"]
 
-  # Monitor the exporter itself and include those metrics in the results.
-  [include_exporter_metrics: <bool> | default = false]
-
   #
   # Exporter-specific configuration options
   #
@@ -106,4 +101,13 @@ Full reference of options:
 
   # Skip SSL verification when connecting to Elasticsearch.
   [ ssl_skip_verify: <boolean> ]
+
+  # Include informational aliases metrics.
+  [ aliases: <boolean> ]
+
+  # Export stats for Data Streams.
+  [ data_stream: <boolean> ]
+
+  # Export stats for SLM (Snapshot Lifecycle Management).
+  [ slm: <boolean> ]
 ```

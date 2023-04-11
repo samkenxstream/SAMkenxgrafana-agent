@@ -43,19 +43,23 @@ func (t Type) String() string {
 	return fmt.Sprintf("Type(%d)", t)
 }
 
+// GoString returns the name of t.
+func (t Type) GoString() string { return t.String() }
+
 // RiverType returns the River type from the Go type.
 //
 // Go types map to River types using the following rules:
 //
-//   1. Go numbers (ints, uints, floats) map to a River number
-//   2. Go strings map to a River string
-//   3. Go bools map to a River bool
-//   4. Go arrays and slices map to a River array
-//   5. Go map[string]T map to a River object
-//   6. Go structs map to a River object
-//   7. Valid Go functions map to a River function.
-//   8. Go interfaces map to a River capsule
-//   9. All other Go values map to a River capsule
+//  1. Go numbers (ints, uints, floats) map to a River number.
+//  2. Go strings map to a River string.
+//  3. Go bools map to a River bool.
+//  4. Go arrays and slices map to a River array.
+//  5. Go map[string]T map to a River object.
+//  6. Go structs map to a River object, provided they have at least one field
+//     with a river tag.
+//  7. Valid Go functions map to a River function.
+//  8. Go interfaces map to a River capsule.
+//  9. All other Go values map to a River capsule.
 //
 // Go functions are only valid for River if they have one non-error return type
 // (the first return type) and one optional error return type (the second
@@ -68,15 +72,23 @@ func RiverType(t reflect.Type) Type {
 	// or non-pointer type, so we have to check before and after dereferencing.
 
 	for t.Kind() == reflect.Pointer {
-		if t.Implements(goCapsule) {
+		switch {
+		case t.Implements(goCapsule):
 			return TypeCapsule
+		case t.Implements(goTextMarshaler):
+			return TypeString
 		}
 
 		t = t.Elem()
 	}
 
-	if t.Implements(goCapsule) {
+	switch {
+	case t.Implements(goCapsule):
 		return TypeCapsule
+	case t.Implements(goTextMarshaler):
+		return TypeString
+	case t == goDuration:
+		return TypeString
 	}
 
 	switch t.Kind() {
@@ -115,6 +127,9 @@ func RiverType(t reflect.Type) Type {
 		return TypeObject
 
 	case reflect.Struct:
+		if getCachedTags(t).Len() == 0 {
+			return TypeCapsule
+		}
 		return TypeObject
 
 	case reflect.Func:

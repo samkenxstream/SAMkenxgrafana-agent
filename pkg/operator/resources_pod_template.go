@@ -18,6 +18,7 @@ type podTemplateOptions struct {
 	ExtraVolumes        []core_v1.Volume
 	ExtraVolumeMounts   []core_v1.VolumeMount
 	ExtraEnvVars        []core_v1.EnvVar
+	Privileged          bool
 }
 
 func generatePodTemplate(
@@ -50,6 +51,15 @@ func generatePodTemplate(
 	enableConfigReadAPI := d.Agent.Spec.EnableConfigReadAPI
 	if enableConfigReadAPI {
 		agentArgs = append(agentArgs, "-config.enable-read-api")
+	}
+
+	disableReporting := d.Agent.Spec.DisableReporting
+	if disableReporting {
+		agentArgs = append(agentArgs, "-disable-reporting")
+	}
+
+	if d.Agent.Spec.DisableSupportBundle {
+		agentArgs = append(agentArgs, "-disable-support-bundle")
 	}
 
 	// NOTE(rfratto): the Prometheus Operator supports a ListenLocal to prevent a
@@ -148,7 +158,7 @@ func generatePodTemplate(
 		podLabels         = map[string]string{}
 		podSelectorLabels = map[string]string{
 			"app.kubernetes.io/name":     "grafana-agent",
-			"app.kubernetes.io/version":  build.Version,
+			"app.kubernetes.io/version":  clientutil.SanitizeVolumeName(build.Version),
 			"app.kubernetes.io/instance": d.Agent.Name,
 			"grafana-agent":              d.Agent.Name,
 			managedByOperatorLabel:       managedByOperatorLabelValue,
@@ -189,12 +199,11 @@ func generatePodTemplate(
 	operatorContainers := []core_v1.Container{
 		{
 			Name:         "config-reloader",
-			Image:        "quay.io/prometheus-operator/prometheus-config-reloader:v0.47.0",
+			Image:        "quay.io/prometheus-operator/prometheus-config-reloader:v0.62.0",
 			VolumeMounts: volumeMounts,
 			Env:          envVars,
 			SecurityContext: &core_v1.SecurityContext{
-				Privileged: pointer.Bool(true),
-				RunAsUser:  pointer.Int64(0),
+				RunAsUser: pointer.Int64(0),
 			},
 			Args: []string{
 				"--config-file=/var/lib/grafana-agent/config-in/agent.yml",
@@ -223,7 +232,10 @@ func generatePodTemplate(
 				PeriodSeconds:    5,
 				FailureThreshold: 120, // Allow up to 10m on startup for data recovery
 			},
-			Resources:                d.Agent.Spec.Resources,
+			Resources: d.Agent.Spec.Resources,
+			SecurityContext: &core_v1.SecurityContext{
+				Privileged: pointer.Bool(opts.Privileged),
+			},
 			TerminationMessagePolicy: core_v1.TerminationMessageFallbackToLogsOnError,
 		},
 	}
@@ -251,6 +263,7 @@ func generatePodTemplate(
 			ServiceAccountName:            d.Agent.Spec.ServiceAccountName,
 			NodeSelector:                  d.Agent.Spec.NodeSelector,
 			PriorityClassName:             d.Agent.Spec.PriorityClassName,
+			RuntimeClassName:              d.Agent.Spec.RuntimeClassName,
 			TerminationGracePeriodSeconds: pointer.Int64(4800),
 			Volumes:                       volumes,
 			Tolerations:                   d.Agent.Spec.Tolerations,

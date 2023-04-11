@@ -2,10 +2,11 @@ package config
 
 import (
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
 
+	"github.com/grafana/agent/pkg/config/instrumentation"
 	"github.com/prometheus/common/config"
 )
 
@@ -26,9 +27,9 @@ type remoteProvider interface {
 	retrieve() ([]byte, error)
 }
 
-// newRemoteConfig constructs a new remote configuration provider. The rawURL is parsed
+// newRemoteProvider constructs a new remote configuration provider. The rawURL is parsed
 // and a provider is constructed based on the URL's scheme.
-func newRemoteConfig(rawURL string, opts *remoteOpts) (remoteProvider, error) {
+func newRemoteProvider(rawURL string, opts *remoteOpts) (remoteProvider, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
 		return nil, fmt.Errorf("error parsing rawURL %s: %w", rawURL, err)
@@ -61,7 +62,7 @@ type httpProvider struct {
 	httpClient *http.Client
 }
 
-// newHTTPProvider constructs an new httpProvider
+// newHTTPProvider constructs a new httpProvider
 func newHTTPProvider(opts *remoteOpts) (*httpProvider, error) {
 	httpClientConfig := config.HTTPClientConfig{}
 	if opts.HTTPClientConfig != nil {
@@ -85,14 +86,17 @@ func newHTTPProvider(opts *remoteOpts) (*httpProvider, error) {
 func (p httpProvider) retrieve() ([]byte, error) {
 	response, err := p.httpClient.Get(p.myURL.String())
 	if err != nil {
+		instrumentation.InstrumentRemoteConfigFetchError()
 		return nil, fmt.Errorf("request failed: %w", err)
 	}
 	defer response.Body.Close()
 
+	instrumentation.InstrumentRemoteConfigFetch(response.StatusCode)
+
 	if response.StatusCode/100 != 2 {
 		return nil, fmt.Errorf("error fetching config: status code: %d", response.StatusCode)
 	}
-	bb, err := ioutil.ReadAll(response.Body)
+	bb, err := io.ReadAll(response.Body)
 	if err != nil {
 		return nil, err
 	}

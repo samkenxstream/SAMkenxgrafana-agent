@@ -4,7 +4,8 @@ package redis_exporter //nolint:golint
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
+	"os"
+	"strings"
 	"time"
 
 	"github.com/grafana/agent/pkg/integrations"
@@ -40,6 +41,7 @@ type Config struct {
 	RedisUser               string             `yaml:"redis_user,omitempty"`
 	RedisPassword           config_util.Secret `yaml:"redis_password,omitempty"`
 	RedisPasswordFile       string             `yaml:"redis_password_file,omitempty"`
+	RedisPasswordMapFile    string             `yaml:"redis_password_map_file,omitempty"`
 	Namespace               string             `yaml:"namespace,omitempty"`
 	ConfigCommand           string             `yaml:"config_command,omitempty"`
 	CheckKeys               string             `yaml:"check_keys,omitempty"`
@@ -57,6 +59,7 @@ type Config struct {
 	TLSCaCertFile           string             `yaml:"tls_ca_cert_file,omitempty"`
 	SetClientName           bool               `yaml:"set_client_name,omitempty"`
 	IsTile38                bool               `yaml:"is_tile38,omitempty"`
+	IsCluster               bool               `yaml:"is_cluster,omitempty"`
 	ExportClientList        bool               `yaml:"export_client_list,omitempty"`
 	ExportClientPort        bool               `yaml:"export_client_port,omitempty"`
 	RedisMetricsOnly        bool               `yaml:"redis_metrics_only,omitempty"`
@@ -82,9 +85,12 @@ func (c Config) GetExporterOptions() re.Options {
 		CheckSingleStreams:    c.CheckSingleStreams,
 		CountKeys:             c.CountKeys,
 		InclSystemMetrics:     c.InclSystemMetrics,
+		InclConfigMetrics:     false,
+		RedactConfigMetrics:   true,
 		SkipTLSVerification:   c.SkipTLSVerification,
 		SetClientName:         c.SetClientName,
 		IsTile38:              c.IsTile38,
+		IsCluster:             c.IsCluster,
 		ExportClientList:      c.ExportClientList,
 		ExportClientsInclPort: c.ExportClientPort,
 		ConnectionTimeouts:    c.ConnectionTimeout,
@@ -133,11 +139,15 @@ func New(log log.Logger, c *Config) (integrations.Integration, error) {
 	}
 
 	if c.ScriptPath != "" {
-		ls, err := ioutil.ReadFile(c.ScriptPath)
-		if err != nil {
-			return nil, fmt.Errorf("Error loading script file %s: %w", c.ScriptPath, err)
+		scripts := map[string][]byte{}
+		for _, path := range strings.Split(c.ScriptPath, ",") {
+			ls, err := os.ReadFile(path)
+			if err != nil {
+				return nil, fmt.Errorf("error loading script file %s: %w", c.ScriptPath, err)
+			}
+			scripts[path] = ls
 		}
-		exporterConfig.LuaScript = ls
+		exporterConfig.LuaScript = scripts
 	}
 
 	//new version of the exporter takes the file paths directly, for hot-reloading support (https://github.com/oliver006/redis_exporter/pull/526)
@@ -153,13 +163,28 @@ func New(log log.Logger, c *Config) (integrations.Integration, error) {
 		exporterConfig.CaCertFile = c.TLSCaCertFile
 	}
 
+	// only one type of password file should be specified
+	if c.RedisPasswordFile != "" && c.RedisPasswordMapFile != "" {
+		return nil, errors.New("only one of redis_password_file and redis_password_map_file should be specified")
+	}
+
 	// optional password file to take precedence over password property
 	if c.RedisPasswordFile != "" {
-		password, err := ioutil.ReadFile(c.RedisPasswordFile)
+		password, err := os.ReadFile(c.RedisPasswordFile)
 		if err != nil {
 			return nil, fmt.Errorf("Error loading password file %s: %w", c.RedisPasswordFile, err)
 		}
-		exporterConfig.Password = string(password)
+		exporterConfig.Password = strings.TrimSpace(string(password))
+	}
+
+	// optional password file containing map of redis uris to passwords. If this is specified, it will take
+	// precedence over a different password file
+	if c.RedisPasswordMapFile != "" {
+		passwordMap, err := re.LoadPwdFile(c.RedisPasswordMapFile)
+		if err != nil {
+			return nil, fmt.Errorf("error loading password map file %s: %w", c.RedisPasswordMapFile, err)
+		}
+		exporterConfig.PasswordMap = passwordMap
 	}
 
 	exporter, err := re.NewRedisExporter(

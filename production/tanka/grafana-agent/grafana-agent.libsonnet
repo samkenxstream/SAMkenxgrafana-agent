@@ -31,13 +31,12 @@ k + config {
 
   agent_args:: {
     'config.file': '/etc/agent/agent.yml',
-    'prometheus.wal-directory': '/tmp/agent/data',
+    'metrics.wal-directory': '/tmp/agent/data',
   },
 
   agent_container::
     container.new('agent', $._images.agent) +
     container.withPorts($.core.v1.containerPort.new('http-metrics', 80)) +
-    container.withCommand('/bin/agent') +
     container.withArgsMixin($.util.mapToFlags($.agent_args)) +
     container.withEnv([
       $.core.v1.envVar.fromFieldPath('HOSTNAME', 'spec.nodeName'),

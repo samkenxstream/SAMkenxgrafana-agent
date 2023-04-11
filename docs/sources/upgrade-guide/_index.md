@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/upgrade-guide/
 title: Upgrade guide
 weight: 800
 ---
@@ -10,9 +8,261 @@ weight: 800
 This guide describes all breaking changes that have happened in prior
 releases and how to migrate to newer versions.
 
-## Unreleased Changes
+## v0.32.1
 
-These changes will come in a future version.
+### Breaking change: `node_exporter` configuration options changed
+
+With the update of the `node_exporter` integration to use v1.5.0, configuration
+options for the `diskstats` collector have changed names:
+
+- `diskstats_ignored_devices` is now `diskstats_device_exclude` in the static
+  mode configuration.
+- `ignored_devices` is now `device_exclude` in the Flow component
+  configuration.
+
+### Breaking change: `http_client_config` Flow blocks merged with parent blocks
+
+This change only impacts Grafana Agent Flow users.
+
+To reduce the amount of typing required to write Flow components, the arguments
+and subblocks found in `http_client_config` have been merged with their parent
+blocks:
+
+- `discovery.docker > http_client_config` is merged into the `discovery.docker` block.
+- `discovery.kubernetes > http_client_config` is merged into the `discovery.kubernetes` block.
+- `loki.source.kubernetes > client > http_client_config` is merged into the `client` block.
+- `loki.source.podlogs > client > http_client_config` is merged into the `client` block.
+- `loki.write > endpoint > http_client_config` is merged into the `endpoint` block.
+- `mimir.rules.kubernetes > http_client_config` is merged into the `mimir.rules.kubernetes` block.
+- `otelcol.receiver.opencensus > grpc` is merged into the `otelcol.receiver.opencensus` block.
+- `otelcol.receiver.zipkin > http` is merged into the `otelcol.receiver.zipkin` block.
+- `phlare.scrape > http_client_config` is merged into the `phlare.scrape` block.
+- `phlare.write > endpoint > http_client_config` is merged into the `endpoint` block.
+- `prometheus.remote_write > endpoint > http_client_config` is merged into the `endpoint` block.
+- `prometheus.scrape > http_client_config` is merged into the `prometheus.scrape` block.
+
+Old configuration example:
+
+```river
+prometheus.remote_write "example" {
+  endpoint {
+    url = URL
+
+    http_client_config {
+      basic_auth {
+        username = BASIC_AUTH_USERNAME
+        password = BASIC_AUTH_PASSWORD
+      }
+    }
+  }
+}
+```
+
+New configuration example:
+
+```river
+prometheus.remote_write "example" {
+  endpoint {
+    url = URL
+
+    basic_auth {
+      username = BASIC_AUTH_USERNAME
+      password = BASIC_AUTH_PASSWORD
+    }
+  }
+}
+```
+
+### Breaking change: `loki.process` stage blocks combined into new blocks
+
+This change only impacts Grafana Agent Flow users.
+
+Previously, to add a stage to `loki.process`, two blocks were needed: a block
+called `stage`, then an inner block for the stage being written. Stage blocks
+are now a single block called `stage.STAGENAME`.
+
+Old configuration example:
+
+```river
+loki.process "example" {
+  forward_to = RECEIVER_LIST
+
+  stage {
+    docker {}
+  }
+
+  stage {
+    json {
+      expressions = { output = "log", extra = "" }
+    }
+  }
+}
+```
+
+New configuration example:
+
+```river
+loki.process "example" {
+  forward_to = RECEIVER_LIST
+
+  stage.docker {}
+
+  stage.json {
+    expressions = { output = "log", extra = "" }
+  }
+}
+```
+
+### Breaking change: `client_options` block renamed in `remote.s3` component
+
+This change only impacts Grafana Agent Flow users.
+
+To synchronize naming conventions between `remote.s3` and `remote.http`, the
+`client_options` block has been renamed `client`.
+
+Old configuration example:
+
+```river
+remote.s3 "example" {
+  path = S3_PATH
+
+  client_options {
+    key    = ACCESS_KEY
+    secret = KEY_SECRET
+  }
+}
+```
+
+New configuration example:
+
+```river
+remote.s3 "example" {
+  path = S3_PATH
+
+  client {
+    key    = ACCESS_KEY
+    secret = KEY_SECRET
+  }
+}
+```
+
+### Breaking change: `prometheus.integration.node_exporter` component name changed
+
+This change only impacts Grafana Agent Flow users.
+
+The `prometheus.integration.node_exporter` component has been renamed to
+`prometheus.exporter.unix`. `unix` was chosen as a name to approximate the
+\*nix-like systems the exporter supports.
+
+Old configuration example:
+
+```river
+prometheus.integration.node_exporter { }
+```
+
+New configuration example:
+
+```river
+prometheus.exporter.unix { }
+```
+
+### Breaking change: support for `EXPERIMENTAL_ENABLE_FLOW` environment variable removed
+
+This change only impacts Grafana Agent Flow users.
+
+As first announced in v0.30.0, support for using the `EXPERIMENTAL_ENABLE_FLOW`
+environment variable to enable Flow mode has been removed.
+
+To enable Flow mode, set the `AGENT_MODE` environment variable to `flow`.
+
+## v0.31.1
+
+### Breaking change: all Windows executables are now zipped
+
+All release Windows `.exe` files are now zipped. Prior to v0.31, only
+`grafana-agent-installer.exe` was unzipped.
+
+This fixes an issue from v0.31.0 where all `.exe` files were accidentally left
+unzipped.
+
+## v0.31.0
+
+### Breaking change: binary names are now prefixed with `grafana-`
+
+As first announced in v0.29, release binary names are now prefixed with
+`grafana-`:
+
+- `agent` is now `grafana-agent`.
+- `agentctl` is now `grafana-agentctl`.
+- `agent-operator` is now `grafana-agent-operator`.
+
+For the `grafana/agent` Docker container, the entrypoint is now
+`/bin/grafana-agent`. A symbolic link from `/bin/agent` to the new binary has
+been added.
+
+For the `grafana/agentctl` Docker container, the entrypoint is now
+`/bin/grafana-agentctl`. A symbolic link from `/bin/agentctl` to the new binary
+has been added.
+
+For the `grafana/agent-operator` Docker container, the entrypoint is now
+`/bin/grafana-agent-operator`. A symbolic link from `/bin/agent-operator` to
+the new binary has been added.
+
+These symbolic links will be removed in v0.33. Custom entrypoints must be
+updated prior to v0.33 to use the new binaries before the symbolic links get
+removed.
+
+## v0.30.0
+
+### Breaking change: `ebpf_exporter` integration removed
+
+The `ebpf_exporter` version bundled in the Agent used [bcc][] to compile eBPF
+programs at runtime. This made it hard to run successfully, as the
+dynamic linking approach required a compiler, the correct kernel headers, as
+well as an exact match of the libbpf toolchain on the host system.  For these
+reasons, we've decided to remove the `ebpf_exporter` integration.
+
+Running the `ebpf_exporter` integration is now deprecated and will result in
+configuration errors. To continue using the same configuration file, remove the
+`ebpf` block.
+
+[bcc]: https://github.com/iovisor/bcc
+
+### Deprecation: `EXPERIMENTAL_ENABLE_FLOW` environment variable changed
+
+As part of graduating Grafana Agent Flow to beta, the
+`EXPERIMENTAL_ENABLE_FLOW` environment variable is replaced by setting
+`AGENT_MODE` to `flow`.
+
+Setting `EXPERIMENTAL_ENABLE_FLOW` to `1` or `true` is now deprecated and
+support for it will be removed for the v0.32 release.
+
+## v0.29.0
+
+### Breaking change: JSON-encoded traces from OTLP versions below 0.16.0 are no longer supported
+
+Grafana Agent's OpenTelemetry Collector dependency has been updated from
+v0.55.0 to v0.61.0. OpenTelemetry Collector v0.58.0 [no longer
+translates][translation-removal] from InstrumentationLibrary to Scope.
+
+This means that JSON-encoded traces that still use InstrumentationLibrary will
+be dropped. To work around this issue, either send traces using protobuf or
+update your OTLP protocol version to v0.16.0 or newer.
+
+[translation-removal]: https://github.com/open-telemetry/opentelemetry-collector/pull/5819
+
+### Deprecation: binary names will be prefixed with `grafana-` in v0.31.0
+
+The binary names `agent`, `agentctl`, and `agent-operator` have been deprecated
+and will be renamed to `grafana-agent`, `grafana-agentctl`, and
+`grafana-agent-operator` respectively in the v0.31.0 release.
+
+As part of this change, the Docker containers for the v0.31.0 release will
+include symbolic links from the old binary names to the new binary names.
+
+There is no action to take at this time.
+
+## v0.24.0
 
 ### Breaking change: Deprecated YAML fields in `server` block removed
 
@@ -279,7 +529,7 @@ will be logged if using the old field names when the integration is enabled.
 
 ## v0.21.2, v0.20.1
 
-### Disabling of config retrieval enpoints
+### Disabling of config retrieval endpoints
 
 These two patch releases, as part of a fix for
 [CVE-2021-41090](https://github.com/grafana/agent/security/advisories/GHSA-9c4x-5hgq-q3wh),
@@ -305,7 +555,7 @@ configuring the `instance` field on the integration. This can also be useful if
 two agents infer the same value for instance for the same integration.
 
 As part of this change, the `agent_hostname` label is permanently affixed to
-self-scraped integrations and cannot be disabled. This disambigutates multiple
+self-scraped integrations and cannot be disabled. This disambiguates multiple
 agents using the same instance label for an integration, and allows users to
 identify which agents need to be updated with an override for `instance`.
 

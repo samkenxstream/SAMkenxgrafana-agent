@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/configuration/integrations/integrations-next/eventhandler-config/
 title: eventhandler_config
 ---
 
@@ -47,6 +45,13 @@ below.
 Configuration reference:
 
 ```yaml
+  # Provide an explicit value to uniquely identify this instance of the
+  # integration. If not provided, a reasonable default will be inferred based
+  # on the integration.
+  #
+  # The value here must be unique across all instances of the same integration.
+  [instance: <string>]
+
   ## Eventhandler hands watched events off to promtail using a promtail
   ## client channel. This parameter configures how long to wait (in seconds) on the channel
   ## before abandoning and moving on.
@@ -206,7 +211,7 @@ spec:
         - -enable-features=integrations-next
         - -server.http.address=0.0.0.0:12345
         command:
-        - /bin/agent
+        - /bin/grafana-agent
         env:
         - name: HOSTNAME
           valueFrom:

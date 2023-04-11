@@ -4,18 +4,21 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"path"
 	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
 	"github.com/grafana/agent/component"
-	"github.com/grafana/agent/pkg/flow/internal/dag"
-	"github.com/hashicorp/hcl/v2"
-	"github.com/rfratto/gohcl"
+	"github.com/grafana/agent/pkg/flow/logging"
+	"github.com/grafana/agent/pkg/river/ast"
+	"github.com/grafana/agent/pkg/river/vm"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/atomic"
 )
 
@@ -24,11 +27,13 @@ import (
 // "remote.http.example" is ComponentID{"remote", "http", "example"}.
 type ComponentID []string
 
-// BlockComponentID returns the ComponentID specified by an HCL block.
-func BlockComponentID(b *hcl.Block) ComponentID {
-	id := make(ComponentID, 0, 1+len(b.Labels)) // add 1 for the block type
-	id = append(id, b.Type)
-	id = append(id, b.Labels...)
+// BlockComponentID returns the ComponentID specified by an River block.
+func BlockComponentID(b *ast.BlockStmt) ComponentID {
+	id := make(ComponentID, 0, len(b.Name)+1) // add 1 for the optional label
+	id = append(id, b.Name...)
+	if b.Label != "" {
+		id = append(id, b.Label)
+	}
 	return id
 }
 
@@ -53,26 +58,37 @@ func (id ComponentID) Equals(other ComponentID) bool {
 // ComponentGlobals are used by ComponentNodes to build managed components. All
 // ComponentNodes should use the same ComponentGlobals.
 type ComponentGlobals struct {
-	Logger          log.Logger              // Logger shared between all managed components.
-	DataPath        string                  // Shared directory where component data may be stored
-	OnExportsChange func(cn *ComponentNode) // Invoked when the managed component updated its exports
+	LogSink           *logging.Sink                // Sink used for Logging.
+	Logger            *logging.Logger              // Logger shared between all managed components.
+	TraceProvider     trace.TracerProvider         // Tracer shared between all managed components.
+	DataPath          string                       // Shared directory where component data may be stored
+	OnComponentUpdate func(cn *ComponentNode)      // Informs controller that we need to reevaluate
+	OnExportsChange   func(exports map[string]any) // Invoked when the managed component updated its exports
+	Registerer        prometheus.Registerer        // Registerer for serving agent and component metrics
+	HTTPPathPrefix    string                       // HTTP prefix for components.
+	HTTPListenAddr    string                       // Base address for server
+	ControllerID      string                       // ID of controller.
 }
 
 // ComponentNode is a controller node which manages a user-defined component.
 //
 // ComponentNode manages the underlying component and caches its current
 // arguments and exports. ComponentNode manages the arguments for the component
-// from an HCL block.
+// from a River block.
 type ComponentNode struct {
-	id              ComponentID
-	nodeID          string // Cached from id.String() to avoid allocating new strings every time NodeID is called.
-	reg             component.Registration
-	managedOpts     component.Options
-	exportsType     reflect.Type
-	onExportsChange func(cn *ComponentNode) // Informs controller that we changed our exports
+	id                ComponentID
+	label             string
+	componentName     string
+	nodeID            string // Cached from id.String() to avoid allocating new strings every time NodeID is called.
+	reg               component.Registration
+	managedOpts       component.Options
+	register          *wrappedRegisterer
+	exportsType       reflect.Type
+	OnComponentUpdate func(cn *ComponentNode) // Informs controller that we need to reevaluate
 
 	mut     sync.RWMutex
-	block   *hcl.Block          // Current HCL block to derive args from
+	block   *ast.BlockStmt // Current River block to derive args from
+	eval    *vm.Evaluator
 	managed component.Component // Inner managed component
 	args    component.Arguments // Evaluated arguments for the managed component
 
@@ -90,23 +106,21 @@ type ComponentNode struct {
 	exports    component.Exports // Evaluated exports for the managed component
 }
 
-var (
-	_ dag.Node = (*ComponentNode)(nil)
-)
+var _ BlockNode = (*ComponentNode)(nil)
 
-// NewComponentNode creates a new ComponentNode from an initial hcl.Block. The
-// underlying managed component isn't created until Evaluate is called.
-func NewComponentNode(globals ComponentGlobals, b *hcl.Block) *ComponentNode {
+// NewComponentNode creates a new ComponentNode from an initial ast.BlockStmt.
+// The underlying managed component isn't created until Evaluate is called.
+func NewComponentNode(globals ComponentGlobals, b *ast.BlockStmt) *ComponentNode {
 	var (
 		id     = BlockComponentID(b)
 		nodeID = id.String()
 	)
 
-	reg, ok := getRegistration(id)
+	reg, ok := component.Get(ComponentID(b.Name).String())
 	if !ok {
 		// NOTE(rfratto): It's normally not possible to get to this point; the
-		// HCL schema should be validated in advance to guarantee that b is an
-		// expected component.
+		// blocks should have been validated by the graph loader in advance to
+		// guarantee that b is an expected component.
 		panic("NewComponentNode: could not find registration for component " + nodeID)
 	}
 
@@ -117,13 +131,16 @@ func NewComponentNode(globals ComponentGlobals, b *hcl.Block) *ComponentNode {
 	}
 
 	cn := &ComponentNode{
-		id:              id,
-		nodeID:          nodeID,
-		reg:             reg,
-		exportsType:     getExportsType(reg),
-		onExportsChange: globals.OnExportsChange,
+		id:                id,
+		label:             b.Label,
+		nodeID:            nodeID,
+		componentName:     strings.Join(b.Name, "."),
+		reg:               reg,
+		exportsType:       getExportsType(reg),
+		OnComponentUpdate: globals.OnComponentUpdate,
 
 		block: b,
+		eval:  vm.New(b.Body),
 
 		// Prepopulate arguments and exports with their zero values.
 		args:    reg.Args,
@@ -137,26 +154,37 @@ func NewComponentNode(globals ComponentGlobals, b *hcl.Block) *ComponentNode {
 	return cn
 }
 
-func getRegistration(id ComponentID) (component.Registration, bool) {
-	// id is the fully qualified name of the component, including the custom user
-	// identifier, if supported by the component. We don't know if the component
-	// we're looking up is a singleton or not, so we have to try the lookup
-	// twice: once with all name fragments in the ID and once without the last
-	// one (e.g., the one that represents the user ID).
-	reg, ok := component.Get(id.String())
-	if ok {
-		return reg, ok
+func getManagedOptions(globals ComponentGlobals, cn *ComponentNode) component.Options {
+	// Make sure the prefix is always absolute.
+	prefix := globals.HTTPPathPrefix
+	if !strings.HasPrefix(prefix, "/") {
+		prefix = "/" + prefix
 	}
 
-	reg, ok = component.Get(id[:len(id)-1].String())
-	return reg, ok
-}
+	// We need to generate a globally unique component ID to give to the
+	// component and for use with telemetry data which doesn't support
+	// reconstructing the global ID. For everything else (HTTP, data), we can
+	// just use the controller-local ID as those values are guaranteed to be
+	// globally unique.
+	globalID := cn.nodeID
+	if globals.ControllerID != "" {
+		globalID = path.Join(globals.ControllerID, cn.nodeID)
+	}
 
-func getManagedOptions(globals ComponentGlobals, cn *ComponentNode) component.Options {
+	wrapped := newWrappedRegisterer()
+	cn.register = wrapped
 	return component.Options{
-		ID:            cn.nodeID,
-		Logger:        log.With(globals.Logger, "component", cn.nodeID),
-		DataPath:      filepath.Join(globals.DataPath, cn.nodeID),
+		ID:     globalID,
+		Logger: logging.New(logging.LoggerSink(globals.Logger), logging.WithComponentID(cn.nodeID)),
+		Registerer: prometheus.WrapRegistererWith(prometheus.Labels{
+			"component_id": globalID,
+		}, wrapped),
+		Tracer: wrapTracer(globals.TraceProvider, globalID),
+
+		DataPath:       filepath.Join(globals.DataPath, cn.nodeID),
+		HTTPListenAddr: globals.HTTPListenAddr,
+		HTTPPath:       path.Join(prefix, cn.nodeID) + "/",
+
 		OnStateChange: cn.setExports,
 	}
 }
@@ -168,38 +196,45 @@ func getExportsType(reg component.Registration) reflect.Type {
 	return nil
 }
 
-// ID returns the component ID of the managed component from its HCL block.
+// ID returns the component ID of the managed component from its River block.
 func (cn *ComponentNode) ID() ComponentID { return cn.id }
 
+// Label returns the label for the block or "" if none was specified.
+func (cn *ComponentNode) Label() string { return cn.label }
+
+// ComponentName returns the component's type, i.e. `local.file.test` returns `local.file`.
+func (cn *ComponentNode) ComponentName() string { return cn.componentName }
+
 // NodeID implements dag.Node and returns the unique ID for this node. The
-// NodeID is the string representation of the component's ID from its HCL
+// NodeID is the string representation of the component's ID from its River
 // block.
 func (cn *ComponentNode) NodeID() string { return cn.nodeID }
 
-// UpdateBlock updates the HCL block used to construct arguments for the
+// UpdateBlock updates the River block used to construct arguments for the
 // managed component. The new block isn't used until the next time Evaluate is
 // invoked.
 //
 // UpdateBlock will panic if the block does not match the component ID of the
 // ComponentNode.
-func (cn *ComponentNode) UpdateBlock(b *hcl.Block) {
+func (cn *ComponentNode) UpdateBlock(b *ast.BlockStmt) {
 	if !BlockComponentID(b).Equals(cn.id) {
-		panic("UpdateBlock called with an HCL block with a different component ID")
+		panic("UpdateBlock called with an River block with a different component ID")
 	}
 
 	cn.mut.Lock()
 	defer cn.mut.Unlock()
 	cn.block = b
+	cn.eval = vm.New(b.Body)
 }
 
-// Evaluate updates the arguments for the managed component by re-evaluating
-// its HCL block with the provided evaluation context. The managed component
+// Evaluate implements BlockNode and updates the arguments for the managed component
+// by re-evaluating its River block with the provided scope. The managed component
 // will be built the first time Evaluate is called.
 //
-// Evaluate will return an error if the HCL block cannot be evaluated or if
+// Evaluate will return an error if the River block cannot be evaluated or if
 // decoding to arguments fails.
-func (cn *ComponentNode) Evaluate(ectx *hcl.EvalContext) error {
-	err := cn.evaluate(ectx)
+func (cn *ComponentNode) Evaluate(scope *vm.Scope) error {
+	err := cn.evaluate(scope)
 
 	switch err {
 	case nil:
@@ -212,36 +247,35 @@ func (cn *ComponentNode) Evaluate(ectx *hcl.EvalContext) error {
 	return err
 }
 
-func (cn *ComponentNode) evaluate(ectx *hcl.EvalContext) error {
+func (cn *ComponentNode) evaluate(scope *vm.Scope) error {
 	cn.mut.Lock()
 	defer cn.mut.Unlock()
 
 	cn.doingEval.Store(true)
 	defer cn.doingEval.Store(false)
 
-	args := cn.reg.CloneArguments()
-	diags := gohcl.DecodeBody(cn.block.Body, ectx, args)
-	if diags.HasErrors() {
-		return fmt.Errorf("decoding HCL: %w", diags)
+	argsPointer := cn.reg.CloneArguments()
+	if err := cn.eval.Evaluate(scope, argsPointer); err != nil {
+		return fmt.Errorf("decoding River: %w", err)
 	}
 
 	// args is always a pointer to the args type, so we want to deference it since
 	// components expect a non-pointer.
-	argsCopy := reflect.ValueOf(args).Elem().Interface()
+	argsCopyValue := reflect.ValueOf(argsPointer).Elem().Interface()
 
 	if cn.managed == nil {
 		// We haven't built the managed component successfully yet.
-		managed, err := cn.reg.Build(cn.managedOpts, argsCopy)
+		managed, err := cn.reg.Build(cn.managedOpts, argsCopyValue)
 		if err != nil {
 			return fmt.Errorf("building component: %w", err)
 		}
 		cn.managed = managed
-		cn.args = argsCopy
+		cn.args = argsCopyValue
 
 		return nil
 	}
 
-	if reflect.DeepEqual(cn.args, args) {
+	if reflect.DeepEqual(cn.args, argsCopyValue) {
 		// Ignore components which haven't changed. This reduces the cost of
 		// calling evaluate for components where evaluation is expensive (e.g., if
 		// re-evaluating requires re-starting some internal logic).
@@ -249,11 +283,11 @@ func (cn *ComponentNode) evaluate(ectx *hcl.EvalContext) error {
 	}
 
 	// Update the existing managed component
-	if err := cn.managed.Update(argsCopy); err != nil {
+	if err := cn.managed.Update(argsCopyValue); err != nil {
 		return fmt.Errorf("updating component: %w", err)
 	}
 
-	cn.args = argsCopy
+	cn.args = argsCopyValue
 	return nil
 }
 
@@ -276,12 +310,12 @@ func (cn *ComponentNode) Run(ctx context.Context) error {
 	err := cn.managed.Run(ctx)
 
 	var exitMsg string
-	log := cn.managedOpts.Logger
+	logger := cn.managedOpts.Logger
 	if err != nil {
-		level.Error(log).Log("msg", "component exited with error", "err", err)
+		level.Error(logger).Log("msg", "component exited with error", "err", err)
 		exitMsg = fmt.Sprintf("component shut down with error: %s", err)
 	} else {
-		level.Info(log).Log("msg", "component exited")
+		level.Info(logger).Log("msg", "component exited")
 		exitMsg = "component shut down normally"
 	}
 
@@ -298,6 +332,13 @@ func (cn *ComponentNode) Arguments() component.Arguments {
 	cn.mut.RLock()
 	defer cn.mut.RUnlock()
 	return cn.args
+}
+
+// Block implements BlockNode and returns the current block of the managed component.
+func (cn *ComponentNode) Block() *ast.BlockStmt {
+	cn.mut.RLock()
+	defer cn.mut.RUnlock()
+	return cn.block
 }
 
 // Exports returns the current set of exports from the managed component.
@@ -346,7 +387,7 @@ func (cn *ComponentNode) setExports(e component.Exports) {
 
 	if changed {
 		// Inform the controller that we have new exports.
-		cn.onExportsChange(cn)
+		cn.OnComponentUpdate(cn)
 	}
 }
 
@@ -355,11 +396,11 @@ func (cn *ComponentNode) setExports(e component.Exports) {
 // The health of a ComponentNode is tracked from three parts, in descending
 // precedence order:
 //
-//     1. Exited health from a call to Run()
-//     2. Unhealthy status from last call to Evaluate
-//     3. Health reported by the managed component (if any)
-//     4. Latest health from Run() or Evaluate(), if the managed component does not
-//        report health.
+//  1. Exited health from a call to Run()
+//  2. Unhealthy status from last call to Evaluate
+//  3. Health reported by the managed component (if any)
+//  4. Latest health from Run() or Evaluate(), if the managed component does not
+//     report health.
 func (cn *ComponentNode) CurrentHealth() component.Health {
 	cn.healthMut.RLock()
 	defer cn.healthMut.RUnlock()
@@ -425,4 +466,14 @@ func (cn *ComponentNode) setRunHealth(t component.HealthType, msg string) {
 		Message:    msg,
 		UpdateTime: time.Now(),
 	}
+}
+
+// HTTPHandler returns an http handler for a component IF it implements HTTPComponent.
+// otherwise it will return nil.
+func (cn *ComponentNode) HTTPHandler() http.Handler {
+	handler, ok := cn.managed.(component.HTTPComponent)
+	if !ok {
+		return nil
+	}
+	return handler.Handler()
 }

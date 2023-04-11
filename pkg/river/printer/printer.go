@@ -13,7 +13,7 @@ import (
 
 // Config configures behavior of the printer.
 type Config struct {
-	Indent int // Identation to apply to all emitted code. Default 0.
+	Indent int // Indentation to apply to all emitted code. Default 0.
 }
 
 // Fprint pretty-prints the specified node to w. The Node type must be an
@@ -196,7 +196,7 @@ func (p *printer) Write(args ...interface{}) {
 			p.lastTok = token.LITERAL
 			continue
 
-		case *ast.IdentifierExpr:
+		case *ast.Ident:
 			data = arg.Name
 			p.lastTok = token.IDENT
 
@@ -339,7 +339,7 @@ func (p *printer) writeCommentPrefix(next token.Position, c *ast.Comment) {
 	}
 }
 
-func (p *printer) writeComment(next token.Position, c *ast.Comment) {
+func (p *printer) writeComment(_ token.Position, c *ast.Comment) {
 	p.writeString(c.StartPos.Position(), c.Text, true)
 }
 
@@ -351,6 +351,8 @@ func (p *printer) writeCommentSuffix(next token.Position, tok token.Token, lastC
 		// return early.
 		return
 	}
+
+	var droppedFF bool
 
 	// If our final comment is a block comment and is on the same line as the
 	// next token, add a space as a suffix to separate them.
@@ -368,15 +370,25 @@ func (p *printer) writeCommentSuffix(next token.Position, tok token.Token, lastC
 		case wsIndent, wsUnindent:
 			continue
 		case wsNewline, wsFormfeed:
+			if ws == wsFormfeed {
+				droppedFF = true
+			}
 			p.whitespace[i] = wsIgnore
 		}
 	}
+
 	p.writeWritespace(len(p.whitespace))
 
 	// Write newlines as long as the next token isn't EOF (so that there's no
 	// blank newlines at the end of the file).
 	if newlines > 0 {
-		p.writeByte('\n', newlineLimit(newlines))
+		ch := byte('\n')
+		if droppedFF {
+			// If we dropped a formfeed while writing comments, we should emit a new
+			// one.
+			ch = byte('\f')
+		}
+		p.writeByte(ch, newlineLimit(newlines))
 	}
 }
 

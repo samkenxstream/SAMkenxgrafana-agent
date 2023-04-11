@@ -6,6 +6,8 @@ package ast
 
 import (
 	"fmt"
+	"reflect"
+	"strings"
 
 	"github.com/grafana/agent/pkg/river/token"
 )
@@ -15,7 +17,7 @@ type Node interface {
 	astNode()
 }
 
-// Stmt is a type of statement wthin the body of a file or block.
+// Stmt is a type of statement within the body of a file or block.
 type Stmt interface {
 	Node
 	astStmt()
@@ -55,24 +57,30 @@ type Comment struct {
 
 // AttributeStmt is a key-value pair being set in a Body or BlockStmt.
 type AttributeStmt struct {
-	Name  *IdentifierExpr
+	Name  *Ident
 	Value Expr
 }
 
 // BlockStmt declares a block.
 type BlockStmt struct {
-	Name    []string
-	NamePos token.Pos
-	Label   string
-	Body    Body
+	Name     []string
+	NamePos  token.Pos
+	Label    string
+	LabelPos token.Pos
+	Body     Body
 
 	LCurlyPos, RCurlyPos token.Pos
 }
 
-// IdentifierExpr refers to a named value.
-type IdentifierExpr struct {
+// Ident holds an identifier with its position.
+type Ident struct {
 	Name    string
 	NamePos token.Pos
+}
+
+// IdentifierExpr refers to a named value.
+type IdentifierExpr struct {
+	Ident *Ident
 }
 
 // LiteralExpr is a constant value of a specific token kind.
@@ -101,7 +109,7 @@ type ObjectExpr struct {
 // ObjectField defines an individual key-value pair within an object.
 // ObjectField does not implement Node.
 type ObjectField struct {
-	Name   *IdentifierExpr
+	Name   *Ident
 	Quoted bool // True if the name was wrapped in quotes
 	Value  Expr
 }
@@ -109,7 +117,7 @@ type ObjectField struct {
 // AccessExpr accesses a field in an object value by name.
 type AccessExpr struct {
 	Value Expr
-	Name  *IdentifierExpr
+	Name  *Ident
 }
 
 // IndexExpr accesses an index in an array value.
@@ -140,7 +148,7 @@ type BinaryExpr struct {
 	Left, Right Expr
 }
 
-// ParenExpr represents an expression wrapped in parenthesis.
+// ParenExpr represents an expression wrapped in parentheses.
 type ParenExpr struct {
 	Inner                Expr
 	LParenPos, RParenPos token.Pos
@@ -153,6 +161,7 @@ var (
 	_ Node = (*Body)(nil)
 	_ Node = (*AttributeStmt)(nil)
 	_ Node = (*BlockStmt)(nil)
+	_ Node = (*Ident)(nil)
 	_ Node = (*IdentifierExpr)(nil)
 	_ Node = (*LiteralExpr)(nil)
 	_ Node = (*ArrayExpr)(nil)
@@ -185,6 +194,7 @@ func (n CommentGroup) astNode()    {}
 func (n *Comment) astNode()        {}
 func (n *AttributeStmt) astNode()  {}
 func (n *BlockStmt) astNode()      {}
+func (n *Ident) astNode()          {}
 func (n *IdentifierExpr) astNode() {}
 func (n *LiteralExpr) astNode()    {}
 func (n *ArrayExpr) astNode()      {}
@@ -212,7 +222,7 @@ func (n *ParenExpr) astExpr()      {}
 
 // StartPos returns the position of the first character belonging to a Node.
 func StartPos(n Node) token.Pos {
-	if n == nil {
+	if n == nil || reflect.ValueOf(n).IsZero() {
 		return token.NoPos
 	}
 	switch n := n.(type) {
@@ -234,8 +244,10 @@ func StartPos(n Node) token.Pos {
 		return StartPos(n.Name)
 	case *BlockStmt:
 		return n.NamePos
-	case *IdentifierExpr:
+	case *Ident:
 		return n.NamePos
+	case *IdentifierExpr:
+		return StartPos(n.Ident)
 	case *LiteralExpr:
 		return n.ValuePos
 	case *ArrayExpr:
@@ -261,7 +273,7 @@ func StartPos(n Node) token.Pos {
 
 // EndPos returns the position of the final character in a Node.
 func EndPos(n Node) token.Pos {
-	if n == nil {
+	if n == nil || reflect.ValueOf(n).IsZero() {
 		return token.NoPos
 	}
 	switch n := n.(type) {
@@ -283,8 +295,10 @@ func EndPos(n Node) token.Pos {
 		return EndPos(n.Value)
 	case *BlockStmt:
 		return n.RCurlyPos
-	case *IdentifierExpr:
+	case *Ident:
 		return n.NamePos.Add(len(n.Name) - 1)
+	case *IdentifierExpr:
+		return EndPos(n.Ident)
 	case *LiteralExpr:
 		return n.ValuePos.Add(len(n.Value) - 1)
 	case *ArrayExpr:
@@ -306,4 +320,9 @@ func EndPos(n Node) token.Pos {
 	default:
 		panic(fmt.Sprintf("Unhandled Node type %T", n))
 	}
+}
+
+// GetBlockName retrieves the "." delimited block name.
+func (block *BlockStmt) GetBlockName() string {
+	return strings.Join(block.Name, ".")
 }

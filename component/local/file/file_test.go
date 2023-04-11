@@ -10,7 +10,7 @@ import (
 
 	"github.com/grafana/agent/component/local/file"
 	"github.com/grafana/agent/pkg/flow/componenttest"
-	"github.com/grafana/agent/pkg/flow/hcltypes"
+	"github.com/grafana/agent/pkg/flow/rivertypes"
 	"github.com/stretchr/testify/require"
 )
 
@@ -47,7 +47,7 @@ func runFileTests(t *testing.T, ut file.Detector) {
 		// Swallow the initial exports notification.
 		require.NoError(t, tc.WaitExports(time.Second))
 		require.Equal(t, file.Exports{
-			Content: &hcltypes.OptionalSecret{
+			Content: rivertypes.OptionalSecret{
 				IsSecret: false,
 				Value:    "First load!",
 			},
@@ -64,7 +64,7 @@ func runFileTests(t *testing.T, ut file.Detector) {
 
 		require.NoError(t, sc.WaitExports(time.Second))
 		require.Equal(t, file.Exports{
-			Content: &hcltypes.OptionalSecret{
+			Content: rivertypes.OptionalSecret{
 				IsSecret: false,
 				Value:    "New content!",
 			},
@@ -81,7 +81,7 @@ func runFileTests(t *testing.T, ut file.Detector) {
 
 		require.NoError(t, sc.WaitExports(time.Second))
 		require.Equal(t, file.Exports{
-			Content: &hcltypes.OptionalSecret{
+			Content: rivertypes.OptionalSecret{
 				IsSecret: false,
 				Value:    "New content!",
 			},
@@ -108,14 +108,14 @@ func TestFile_ImmediateExports(t *testing.T) {
 
 	require.NoError(t, tc.WaitExports(time.Second))
 	require.Equal(t, file.Exports{
-		Content: &hcltypes.OptionalSecret{
+		Content: rivertypes.OptionalSecret{
 			IsSecret: false,
 			Value:    "Hello, world!",
 		},
 	}, tc.Exports())
 }
 
-// TestFile_ExistOnLoad ensures that the the configured file must exist on the
+// TestFile_ExistOnLoad ensures that the configured file must exist on the
 // first load of local.file.
 func TestFile_ExistOnLoad(t *testing.T) {
 	testFile := filepath.Join(t.TempDir(), "testfile")

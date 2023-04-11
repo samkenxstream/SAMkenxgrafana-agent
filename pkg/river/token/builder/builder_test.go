@@ -46,6 +46,7 @@ func TestBuilder_File(t *testing.T) {
 func TestBuilder_GoEncode(t *testing.T) {
 	f := builder.NewFile()
 
+	f.Body().AppendTokens([]builder.Token{{token.COMMENT, "// Hello, world!"}})
 	f.Body().SetAttributeValue("null_value", nil)
 	f.Body().AppendTokens([]builder.Token{{token.LITERAL, "\n"}})
 
@@ -69,6 +70,7 @@ func TestBuilder_GoEncode(t *testing.T) {
 	})
 
 	expect := format(t, `
+		// Hello, world!
 		null_value = null
 	
 		num     = 15 
@@ -88,6 +90,203 @@ func TestBuilder_GoEncode(t *testing.T) {
 		mixed_list = [0, true, {
 			key = true,
 		}, "Hello!"]
+	`)
+
+	require.Equal(t, expect, string(f.Bytes()))
+}
+
+// TestBuilder_GoEncode_SortMapKeys ensures that object literals from unordered
+// values (i.e., Go maps) are printed in a deterministic order by sorting the
+// keys lexicographically. Other object literals should be printed in the order
+// the keys are reported in (i.e., in the order presented by the Go structs).
+func TestBuilder_GoEncode_SortMapKeys(t *testing.T) {
+	f := builder.NewFile()
+
+	type Ordered struct {
+		SomeKey  string `river:"some_key,attr"`
+		OtherKey string `river:"other_key,attr"`
+	}
+
+	// Maps are unordered because you can't iterate over their keys in a
+	// consistent order.
+	var unordered = map[string]interface{}{
+		"key_a": 1,
+		"key_c": 3,
+		"key_b": 2,
+	}
+
+	f.Body().SetAttributeValue("ordered", Ordered{SomeKey: "foo", OtherKey: "bar"})
+	f.Body().SetAttributeValue("unordered", unordered)
+
+	expect := format(t, `
+		ordered = {
+			some_key  = "foo",
+			other_key = "bar",
+		}
+		unordered = {
+			key_a = 1,
+			key_b = 2,
+			key_c = 3,
+		}
+	`)
+
+	require.Equal(t, expect, string(f.Bytes()))
+}
+
+func TestBuilder_AppendFrom(t *testing.T) {
+	type InnerBlock struct {
+		Number int `river:"number,attr"`
+	}
+
+	type Structure struct {
+		Field string `river:"field,attr"`
+
+		Block       InnerBlock   `river:"block,block"`
+		OtherBlocks []InnerBlock `river:"other_block,block"`
+	}
+
+	f := builder.NewFile()
+	f.Body().AppendFrom(Structure{
+		Field: "some_value",
+
+		Block: InnerBlock{Number: 1},
+		OtherBlocks: []InnerBlock{
+			{Number: 2},
+			{Number: 3},
+		},
+	})
+
+	expect := format(t, `
+		field = "some_value"
+	
+		block {
+			number = 1
+		}
+
+		other_block {
+			number = 2
+		}
+
+		other_block {
+			number = 3
+		}
+	`)
+
+	require.Equal(t, expect, string(f.Bytes()))
+}
+
+func TestBuilder_AppendFrom_EnumSlice(t *testing.T) {
+	type InnerBlock struct {
+		Number int `river:"number,attr"`
+	}
+
+	type EnumBlock struct {
+		BlockA InnerBlock `river:"a,block,optional"`
+		BlockB InnerBlock `river:"b,block,optional"`
+		BlockC InnerBlock `river:"c,block,optional"`
+	}
+
+	type Structure struct {
+		Field string `river:"field,attr"`
+
+		OtherBlocks []EnumBlock `river:"block,enum"`
+	}
+
+	f := builder.NewFile()
+	f.Body().AppendFrom(Structure{
+		Field: "some_value",
+		OtherBlocks: []EnumBlock{
+			{BlockC: InnerBlock{Number: 1}},
+			{BlockB: InnerBlock{Number: 2}},
+			{BlockC: InnerBlock{Number: 3}},
+		},
+	})
+
+	expect := format(t, `
+		field = "some_value"
+	
+		block.c {
+			number = 1
+		}
+
+		block.b {
+			number = 2
+		}
+
+		block.c {
+			number = 3
+		}
+	`)
+
+	require.Equal(t, expect, string(f.Bytes()))
+}
+
+func TestBuilder_AppendFrom_EnumSlice_Pointer(t *testing.T) {
+	type InnerBlock struct {
+		Number int `river:"number,attr"`
+	}
+
+	type EnumBlock struct {
+		BlockA *InnerBlock `river:"a,block,optional"`
+		BlockB *InnerBlock `river:"b,block,optional"`
+		BlockC *InnerBlock `river:"c,block,optional"`
+	}
+
+	type Structure struct {
+		Field string `river:"field,attr"`
+
+		OtherBlocks []EnumBlock `river:"block,enum"`
+	}
+
+	f := builder.NewFile()
+	f.Body().AppendFrom(Structure{
+		Field: "some_value",
+		OtherBlocks: []EnumBlock{
+			{BlockC: &InnerBlock{Number: 1}},
+			{BlockB: &InnerBlock{Number: 2}},
+			{BlockC: &InnerBlock{Number: 3}},
+		},
+	})
+
+	expect := format(t, `
+		field = "some_value"
+	
+		block.c {
+			number = 1
+		}
+
+		block.b {
+			number = 2
+		}
+
+		block.c {
+			number = 3
+		}
+	`)
+
+	require.Equal(t, expect, string(f.Bytes()))
+}
+
+func TestBuilder_SkipOptional(t *testing.T) {
+	type Structure struct {
+		OptFieldA string `river:"opt_field_a,attr,optional"`
+		OptFieldB string `river:"opt_field_b,attr,optional"`
+		ReqFieldA string `river:"req_field_a,attr"`
+		ReqFieldB string `river:"req_field_b,attr"`
+	}
+
+	f := builder.NewFile()
+	f.Body().AppendFrom(Structure{
+		OptFieldA: "some_value",
+		OptFieldB: "", // Zero value
+		ReqFieldA: "some_value",
+		ReqFieldB: "", // Zero value
+	})
+
+	expect := format(t, `
+		opt_field_a = "some_value"
+		req_field_a = "some_value"
+		req_field_b = ""
 	`)
 
 	require.Equal(t, expect, string(f.Bytes()))

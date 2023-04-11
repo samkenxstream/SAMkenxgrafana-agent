@@ -23,6 +23,7 @@ local util = k.util;
       image: this._images.agentsmoke,
       pull_secret: '',
       podPrefix: 'grafana-agent',
+      simulateErrors: true,
     } + config,
 
     rbac:
@@ -40,7 +41,6 @@ local util = k.util;
 
     container::
       container.new('agent-smoke', this._config.image) +
-      container.withCommand('/bin/grafana-agent-smoke') +
       container.withPorts([
         containerPort.newNamed(name='remote-write', containerPort=19090),
       ]) +
@@ -51,6 +51,7 @@ local util = k.util;
         'chaos-frequency': this._config.chaosFrequency,
         'pod-prefix': this._config.podPrefix,
         'fake-remote-write': true,
+        'simulate-errors': this._config.simulateErrors,
       })),
 
     agentsmoke_deployment:

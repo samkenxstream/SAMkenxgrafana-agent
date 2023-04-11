@@ -1,12 +1,12 @@
 ---
 aliases:
-- /docs/agent/latest/dynamic-configuration/logs-traces
+- ../../../dynamic-configuration/logs-traces/
 title: Logs and Traces
 weight: 130
 ---
 # 04 Logs and Traces
 
-Logs and Traces can also be templated. This is built ontop of the previous examples.
+Logs and Traces can also be templated. This is built on top of the previous examples.
 
 `docker run -v ${PWD}/:/etc/grafana grafana/agentctl:latest template-parse file:///etc/grafana/04_config.yml`
 
@@ -49,4 +49,3 @@ configs:
 ## Final
 
 [final.yml](https://github.com/grafana/agent/blob/main/docs/sources/cookbook/dynamic-configuration/01_Basics/04_assets/final.yml)
-

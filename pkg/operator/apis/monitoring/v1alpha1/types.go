@@ -7,6 +7,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+// +genclient
 // +kubebuilder:object:root=true
 // +kubebuilder:resource:path="grafanaagents"
 // +kubebuilder:resource:singular="grafanaagent"
@@ -69,8 +70,8 @@ type GrafanaAgentSpec struct {
 	LogLevel string `json:"logLevel,omitempty"`
 	// LogFormat controls the logging format of the generated pods. Defaults to "logfmt" if not set.
 	LogFormat string `json:"logFormat,omitempty"`
-	// APIServerConfig allows specifying a host and auth methods to access the
-	// Kubernetes API server. If left empty, the Agent will assume that it is
+	// APIServerConfig lets you specify a host and auth methods to access the
+	// Kubernetes API server. If left empty, the Agent assumes that it is
 	// running inside of the cluster and will discover API servers automatically
 	// and use the pod's CA certificate and bearer token file at
 	// /var/run/secrets/kubernetes.io/serviceaccount.
@@ -83,26 +84,26 @@ type GrafanaAgentSpec struct {
 	// Paused prevents actions except for deletion to be performed on the
 	// underlying managed objects.
 	Paused bool `json:"paused,omitempty"`
-	// Image, when specified, overrides the image used to run the Agent. It
-	// should be specified along with a tag. Version must still be set to ensure
-	// the Grafana Agent Operator knows which version of Grafana Agent is being
+	// Image, when specified, overrides the image used to run Agent. Specify
+	// the image along with a tag. You still need to set the version to ensure
+	// Grafana Agent Operator knows which version of Grafana Agent is being
 	// configured.
 	Image *string `json:"image,omitempty"`
-	// ImagePullSecrets holds an optional list of references to secrets within
-	// the same namespace to use for pulling the Grafana Agent image from
+	// ImagePullSecrets holds an optional list of references to Secrets within
+	// the same namespace used for pulling the Grafana Agent image from
 	// registries.
-	// More info: https://kubernetes.io/docs/user-guide/images#specifying-imagepullsecrets-on-a-pod
+	// More info: https://kubernetes.io/docs/concepts/containers/images/#specifying-imagepullsecrets-on-a-pod
 	ImagePullSecrets []v1.LocalObjectReference `json:"imagePullSecrets,omitempty"`
 	// Storage spec to specify how storage will be used.
 	Storage *prom_v1.StorageSpec `json:"storage,omitempty"`
 	// Volumes allows configuration of additional volumes on the output
-	// StatefulSet definition. Volumes specified will be appended to other
+	// StatefulSet definition. The volumes specified are appended to other
 	// volumes that are generated as a result of StorageSpec objects.
 	Volumes []v1.Volume `json:"volumes,omitempty"`
-	// VolumeMounts allows configuration of additional VolumeMounts on the output
-	// StatefulSet definition. VolumEMounts specified will be appended to other
-	// VolumeMounts in the Grafana Agent container that are generated as a result
-	// of StorageSpec objects.
+	// VolumeMounts lets you configure additional VolumeMounts on the output
+	// StatefulSet definition. Specified VolumeMounts are appended to other
+	// VolumeMounts generated as a result of StorageSpec objects
+	// in the Grafana Agent container.
 	VolumeMounts []v1.VolumeMount `json:"volumeMounts,omitempty"`
 	// Resources holds requests and limits for individual pods.
 	Resources v1.ResourceRequirements `json:"resources,omitempty"`
@@ -114,7 +115,7 @@ type GrafanaAgentSpec struct {
 	// object which will be mounted into each running Grafana Agent pod.
 	// The secrets are mounted into /etc/grafana-agent/extra-secrets/<secret-name>.
 	Secrets []string `json:"secrets,omitempty"`
-	// ConfigMaps is a liset of config maps in the same namespace as the
+	// ConfigMaps is a list of config maps in the same namespace as the
 	// GrafanaAgent object which will be mounted into each running Grafana Agent
 	// pod.
 	// The ConfigMaps are mounted into /etc/grafana-agent/extra-configmaps/<configmap-name>.
@@ -128,28 +129,32 @@ type GrafanaAgentSpec struct {
 	// SecurityContext holds pod-level security attributes and common container
 	// settings. When unspecified, defaults to the default PodSecurityContext.
 	SecurityContext *v1.PodSecurityContext `json:"securityContext,omitempty"`
-	// Containers allows injecting additional containers or modifying operator
-	// generated containers. This can be used to allow adding an authentication
+	// Containers lets you inject additional containers or modify operator-generated
+	// containers. This can be used to add an authentication
 	// proxy to a Grafana Agent pod or to change the behavior of an
-	// operator-generated container. Containers described here modify an operator
-	// generated container if they share the same name and modifications are done
+	// operator-generated container. Containers described here modify an
+	// operator-generated container if they share the same name and if modifications are done
 	// via a strategic merge patch. The current container names are:
 	// `grafana-agent` and `config-reloader`. Overriding containers is entirely
-	// outside the scope of what the Grafana Agent team will support and by doing
+	// outside the scope of what the Grafana Agent team supports and by doing
 	// so, you accept that this behavior may break at any time without notice.
 	Containers []v1.Container `json:"containers,omitempty"`
-	// InitContainers allows adding initContainers to the pod definition. These
+	// InitContainers let you add initContainers to the pod definition. These
 	// can be used to, for example, fetch secrets for injection into the Grafana
-	// Agent configuration from external sources. Any errors during the execution
-	// of an initContainer will lead to a restart of the pod.
+	// Agent configuration from external sources. Errors during the execution
+	// of an initContainer cause the pod to restart.
 	// More info: https://kubernetes.io/docs/concepts/workloads/pods/init-containers/
 	// Using initContainers for any use case other than secret fetching is
-	// entirely outside the scope of what the Grafana Agent maintainers will
+	// entirely outside the scope of what the Grafana Agent maintainers
 	// support and by doing so, you accept that this behavior may break at any
 	// time without notice.
 	InitContainers []v1.Container `json:"initContainers,omitempty"`
 	// PriorityClassName is the priority class assigned to pods.
 	PriorityClassName string `json:"priorityClassName,omitempty"`
+
+	// RuntimeClassName is the runtime class assigned to pods.
+	RuntimeClassName *string `json:"runtimeClassName,omitempty"`
+
 	// Port name used for the pods and governing service. This defaults to agent-metrics.
 	PortName string `json:"portName,omitempty"`
 
@@ -162,20 +167,28 @@ type GrafanaAgentSpec struct {
 	Logs LogsSubsystemSpec `json:"logs,omitempty"`
 
 	// Integrations controls the integration subsystem of the Agent and settings
-	// unique to integration-specific pods that are deployed.
+	// unique to deployed integration-specific pods.
 	Integrations IntegrationsSubsystemSpec `json:"integrations,omitempty"`
 
-	// enableConfigReadAPI enables the read API for viewing currently running
+	// enableConfigReadAPI enables the read API for viewing the currently running
 	// config port 8080 on the agent.
 	// +kubebuilder:default=false
 	EnableConfigReadAPI bool `json:"enableConfigReadAPI,omitempty"`
+
+	// disableReporting disables reporting of enabled feature flags to Grafana.
+	// +kubebuilder:default=false
+	DisableReporting bool `json:"disableReporting,omitempty"`
+
+	// disableSupportBundle disables the generation of support bundles.
+	// +kubebuilder:default=false
+	DisableSupportBundle bool `json:"disableSupportBundle,omitempty"`
 }
 
 // +kubebuilder:object:generate=false
 
 // ObjectSelector is a set of selectors to use for finding an object in the
-// resource hierarchy. When NamespaceSelector is nil, objects should be
-// searched directly in the ParentNamespace.
+// resource hierarchy. When NamespaceSelector is nil, search for objects
+// directly in the ParentNamespace.
 type ObjectSelector struct {
 	ObjectType        client.Object
 	ParentNamespace   string

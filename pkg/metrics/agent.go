@@ -20,6 +20,7 @@ import (
 	"github.com/grafana/agent/pkg/metrics/cluster/client"
 	"github.com/grafana/agent/pkg/metrics/instance"
 	"github.com/grafana/agent/pkg/util"
+	"github.com/prometheus/prometheus/discovery"
 )
 
 // DefaultConfig is the default settings for the Prometheus-lite client.
@@ -43,9 +44,11 @@ type Config struct {
 	WALCleanupPeriod       time.Duration         `yaml:"wal_cleanup_period,omitempty"`
 	ServiceConfig          cluster.Config        `yaml:"scraping_service,omitempty"`
 	ServiceClientConfig    client.Config         `yaml:"scraping_service_client,omitempty"`
-	Configs                []instance.Config     `yaml:"configs,omitempty,omitempty"`
+	Configs                []instance.Config     `yaml:"configs,omitempty"`
 	InstanceRestartBackoff time.Duration         `yaml:"instance_restart_backoff,omitempty"`
 	InstanceMode           instance.Mode         `yaml:"instance_mode,omitempty"`
+	DisableKeepAlives      bool                  `yaml:"http_disable_keepalives,omitempty"`
+	IdleConnTimeout        time.Duration         `yaml:"http_idle_conn_timeout,omitempty"`
 
 	// Unmarshaled is true when the Config was unmarshaled from YAML.
 	Unmarshaled bool `yaml:"-"`
@@ -78,6 +81,8 @@ func (c *Config) ApplyDefaults() error {
 		return errors.New("cannot use configs when scraping_service mode is enabled")
 	}
 
+	c.Global.DisableKeepAlives = c.DisableKeepAlives
+	c.Global.IdleConnTimeout = c.IdleConnTimeout
 	usedNames := map[string]struct{}{}
 
 	for i := range c.Configs {
@@ -129,8 +134,8 @@ type Agent struct {
 	logger log.Logger
 	reg    prometheus.Registerer
 
-	// Store both the basic manager and the modal manager so we can update their
-	// settings indepedently. Only the ModalManager should be used for mutating
+	// Store both the basic manager and the modal manager, so we can update their
+	// settings independently. Only the ModalManager should be used for mutating
 	// configs.
 	bm      *instance.BasicManager
 	mm      *instance.ModalManager
@@ -149,6 +154,8 @@ type Agent struct {
 
 // New creates and starts a new Agent.
 func New(reg prometheus.Registerer, cfg Config, logger log.Logger) (*Agent, error) {
+	// This registers discovery metrics with the default registry which should be the reg specified above.
+	discovery.RegisterMetrics()
 	return newAgent(reg, cfg, logger, defaultInstanceFactory)
 }
 
@@ -358,7 +365,7 @@ func (a *Agent) Stop() {
 		a.cleaner.Stop()
 	}
 
-	// Only need to stop the ModalManager, which will passthrough everything to the
+	// Only need to stop the ModalManager, which will pass through everything to the
 	// BasicManager.
 	a.mm.Stop()
 

@@ -65,6 +65,13 @@ local new_stage = function(spec) {
   // spec.Labels :: map[string]*string
   labels: optionals.object(spec.Labels),
 
+  // spec.Limit :: *LimitStageSpec
+  limit: if spec.Limit != null then {
+    rate: optionals.number(spec.Limit.Rate),
+    burst: optionals.number(spec.Limit.Burst),
+    drop: if spec.Limit.Drop != null then spec.Limit.Drop else false
+  },
+
   // spec.Metrics :: map[string]MetricsStageSpec
   metrics: if spec.Metrics != null then optionals.object(std.mapWithKey(
     function(key, value) {
@@ -105,6 +112,7 @@ local new_stage = function(spec) {
 
   // spec.Tenant :: *TenantStageSpec
   tenant: if spec.Tenant != null then {
+    label: optionals.string(spec.Tenant.Label),
     source: optionals.string(spec.Tenant.Source),
     value: optionals.string(spec.Tenant.Value),
   },

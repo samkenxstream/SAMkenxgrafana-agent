@@ -111,20 +111,32 @@ func (p *promServiceDiscoProcessor) ConsumeTraces(ctx context.Context, td ptrace
 
 func stringAttributeFromMap(attrs pcommon.Map, key string) string {
 	if attr, ok := attrs.Get(key); ok {
-		if attr.Type() == pcommon.ValueTypeString {
-			return attr.StringVal()
+		if attr.Type() == pcommon.ValueTypeStr {
+			return attr.Str()
 		}
 	}
 	return ""
 }
 
-func getConnectionIP(ctx context.Context) string {
+func (p *promServiceDiscoProcessor) getConnectionIP(ctx context.Context) string {
 	c := client.FromContext(ctx)
 	if c.Addr == nil {
 		return ""
 	}
 
-	return c.Addr.String()
+	host := c.Addr.String()
+	if strings.Contains(host, ":") {
+		var err error
+		splitHost, _, err := net.SplitHostPort(host)
+		if err != nil {
+			// It's normal for this to fail for IPv6 address strings that don't actually include a port.
+			level.Debug(p.logger).Log("msg", "unable to split connection host and port", "host", host, "err", err)
+		} else {
+			host = splitHost
+		}
+	}
+
+	return host
 }
 
 func (p *promServiceDiscoProcessor) getPodIP(ctx context.Context, attrs pcommon.Map) string {
@@ -141,7 +153,7 @@ func (p *promServiceDiscoProcessor) getPodIP(ctx context.Context, attrs pcommon.
 				return hostname
 			}
 		case podAssociationConnectionIP:
-			ip := getConnectionIP(ctx)
+			ip := p.getConnectionIP(ctx)
 			if ip != "" {
 				return ip
 			}
@@ -170,11 +182,15 @@ func (p *promServiceDiscoProcessor) processAttributes(ctx context.Context, attrs
 	for k, v := range labels {
 		switch p.operationType {
 		case OperationTypeUpsert:
-			attrs.UpsertString(string(k), string(v))
+			attrs.PutStr(string(k), string(v))
 		case OperationTypeInsert:
-			attrs.InsertString(string(k), string(v))
+			if _, ok := attrs.Get(string(k)); !ok {
+				attrs.PutStr(string(k), string(v))
+			}
 		case OperationTypeUpdate:
-			attrs.UpdateString(string(k), string(v))
+			if toVal, ok := attrs.Get(string(k)); ok {
+				toVal.SetStr(string(v))
+			}
 		}
 	}
 }
@@ -248,9 +264,9 @@ func (p *promServiceDiscoProcessor) syncTargets(jobName string, group *targetgro
 		for k, v := range discoveredLabels.Clone() {
 			labelMap[string(k)] = string(v)
 		}
-		processedLabels := relabel.Process(labels.FromMap(labelMap), relabelConfig...)
+		processedLabels, keep := relabel.Process(labels.FromMap(labelMap), relabelConfig...)
 		level.Debug(p.logger).Log("processedLabels", processedLabels)
-		if processedLabels == nil { // dropped
+		if !keep {
 			continue
 		}
 

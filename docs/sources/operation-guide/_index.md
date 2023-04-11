@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/operation-guide/
 title: Operation guide
 weight: 700
 ---
@@ -16,15 +14,15 @@ Individual features of Grafana Agent may have stability falling under one of
 the three categories:
 
 * Experimental: we are exploring a new use case and would like feedback.
-  Experimental features are subject to frequent breaking changes during
-  development. Experimental features may be removed with no equivalent
-  replacement. Experimental features are always hidden behind feature flags.
-  Unless removed, experimental features will eventually graduate to beta.
+  Experimental features are subject to frequent breaking changes. Experimental
+  features may be removed with no equivalent replacement. Experimental features
+  may be hidden behind feature flags. Unless removed, experimental features
+  will eventually graduate to beta.
 
 * Beta: we are working on maturing a specific feature. Beta features may be
-  subject to some breaking changes during development. Beta features may be
-  replaced by equivalent functionality which covers that same use case. Beta
-  features can be used without feature flags. Unless replaced by equivalent
+  subject to some breaking changes. Beta features may be replaced by equivalent
+  functionality that covers that same use case. Beta features can be used
+  without a feature flag being set. Unless replaced with equivalent
   functionality, beta features will eventually graduate to stable.
 
 * Stable: we believe this functionality is stable, and breaking changes to
@@ -112,7 +110,7 @@ isn't defined, the Agent will use Go's [os.Hostname](https://golang.org/pkg/os/#
 to determine the hostname.
 
 The following meta-labels are used to determine if a target is running on the
-same machine as the target:
+same machine as the Agent:
 
 - `__address__`
 - `__meta_consul_node`
@@ -209,7 +207,7 @@ your config file.
 
 Shared instances are completely transparent to the user with the exception of
 exposed metrics. With `instance_mode: shared`, metrics for Prometheus components
-(WAL, service discovery, remote_write, etc) have a `instance_group_name` label,
+(WAL, service discovery, remote_write, etc.) have a `instance_group_name` label,
 which is the hash of all settings used to determine the shared instance. When
 `instance_mode: distinct` is set, the metrics for Prometheus components will
 instead have an `instance_name` label, which matches the name set on the

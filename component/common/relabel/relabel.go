@@ -4,10 +4,8 @@ import (
 	"fmt"
 
 	"github.com/grafana/regexp"
-	"github.com/hashicorp/hcl/v2"
 	"github.com/prometheus/common/model"
 	"github.com/prometheus/prometheus/model/relabel"
-	"github.com/rfratto/gohcl"
 )
 
 // Action is the relabelling action to be performed.
@@ -24,6 +22,8 @@ const (
 	LabelKeep Action = "labelkeep"
 	Lowercase Action = "lowercase"
 	Uppercase Action = "uppercase"
+	KeepEqual Action = "keepequal"
+	DropEqual Action = "dropequal"
 )
 
 var actions = map[Action]struct{}{
@@ -36,6 +36,8 @@ var actions = map[Action]struct{}{
 	LabelKeep: {},
 	Lowercase: {},
 	Uppercase: {},
+	KeepEqual: {},
+	DropEqual: {},
 }
 
 // String returns the string representation of the Action type.
@@ -99,13 +101,13 @@ func (re *Regexp) UnmarshalText(text []byte) error {
 
 // Config describes a relabelling step to be applied on a target.
 type Config struct {
-	SourceLabels []string `hcl:"source_labels,optional"`
-	Separator    string   `hcl:"separator,optional"`
-	Regex        Regexp   `hcl:"regex,optional"`
-	Modulus      uint64   `hcl:"modulus,optional"`
-	TargetLabel  string   `hcl:"target_label,optional"`
-	Replacement  string   `hcl:"replacement,optional"`
-	Action       Action   `hcl:"action,optional"`
+	SourceLabels []string `river:"source_labels,attr,optional"`
+	Separator    string   `river:"separator,attr,optional"`
+	Regex        Regexp   `river:"regex,attr,optional"`
+	Modulus      uint64   `river:"modulus,attr,optional"`
+	TargetLabel  string   `river:"target_label,attr,optional"`
+	Replacement  string   `river:"replacement,attr,optional"`
+	Action       Action   `river:"action,attr,optional"`
 }
 
 // DefaultRelabelConfig sets the default values of fields when decoding a RelabelConfig block.
@@ -118,14 +120,12 @@ var DefaultRelabelConfig = Config{
 
 var relabelTarget = regexp.MustCompile(`^(?:(?:[a-zA-Z_]|\$(?:\{\w+\}|\w+))+\w*)+$`)
 
-// DecodeHCL implements gohcl.Decoder.
-// This method is only called on blocks, not objects.
-func (rc *Config) DecodeHCL(body hcl.Body, ctx *hcl.EvalContext) error {
+// UnmarshalRiver implements river.Unmarshaler.
+func (rc *Config) UnmarshalRiver(f func(interface{}) error) error {
 	*rc = DefaultRelabelConfig
 
 	type relabelConfig Config
-	err := gohcl.DecodeBody(body, ctx, (*relabelConfig)(rc))
-	if err != nil {
+	if err := f((*relabelConfig)(rc)); err != nil {
 		return err
 	}
 
@@ -135,8 +135,11 @@ func (rc *Config) DecodeHCL(body hcl.Body, ctx *hcl.EvalContext) error {
 	if rc.Modulus == 0 && rc.Action == HashMod {
 		return fmt.Errorf("relabel configuration for hashmod requires non-zero modulus")
 	}
-	if (rc.Action == Replace || rc.Action == HashMod || rc.Action == Lowercase || rc.Action == Uppercase) && rc.TargetLabel == "" {
+	if (rc.Action == Replace || rc.Action == KeepEqual || rc.Action == DropEqual || rc.Action == HashMod || rc.Action == Lowercase || rc.Action == Uppercase) && rc.TargetLabel == "" {
 		return fmt.Errorf("relabel configuration for %s action requires 'target_label' value", rc.Action)
+	}
+	if (rc.Action == KeepEqual || rc.Action == DropEqual) && rc.SourceLabels == nil {
+		return fmt.Errorf("relabel configuration for %s action requires 'source_labels' value", rc.Action)
 	}
 	if (rc.Action == Replace || rc.Action == Lowercase || rc.Action == Uppercase) && !relabelTarget.MatchString(rc.TargetLabel) {
 		return fmt.Errorf("%q is invalid 'target_label' for %s action", rc.TargetLabel, rc.Action)
@@ -162,12 +165,22 @@ func (rc *Config) DecodeHCL(body hcl.Body, ctx *hcl.EvalContext) error {
 		}
 	}
 
+	if rc.Action == KeepEqual || rc.Action == DropEqual {
+		if rc.Regex != DefaultRelabelConfig.Regex ||
+			rc.Modulus != DefaultRelabelConfig.Modulus ||
+			rc.Separator != DefaultRelabelConfig.Separator ||
+			rc.Replacement != DefaultRelabelConfig.Replacement {
+
+			return fmt.Errorf("%s action requires only 'source_labels' and 'target_label', and no other fields", rc.Action)
+		}
+	}
+
 	return nil
 }
 
-// HCLToPromRelabelConfigs bridges the HCL-based configuration of relabeling
-// steps to the Prometheus implementation.
-func HCLToPromRelabelConfigs(rcs []*Config) []*relabel.Config {
+// ComponentToPromRelabelConfigs bridges the Component-based configuration of
+// relabeling steps to the Prometheus implementation.
+func ComponentToPromRelabelConfigs(rcs []*Config) []*relabel.Config {
 	res := make([]*relabel.Config, len(rcs))
 	for i, rc := range rcs {
 		sourceLabels := make([]model.LabelName, len(rc.SourceLabels))
@@ -188,3 +201,10 @@ func HCLToPromRelabelConfigs(rcs []*Config) []*relabel.Config {
 
 	return res
 }
+
+// Rules returns the relabel configs in use for a relabeling component.
+type Rules []*Config
+
+// RiverCapsule marks the alias defined above as a "capsule type" so that it
+// cannot be invoked by River code.
+func (r Rules) RiverCapsule() {}

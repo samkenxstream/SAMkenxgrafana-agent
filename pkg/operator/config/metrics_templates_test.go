@@ -243,6 +243,7 @@ func TestKubeSDConfig(t *testing.T) {
 }
 
 func TestPodMonitor(t *testing.T) {
+	var falseVal = false
 	tt := []struct {
 		name   string
 		input  map[string]interface{}
@@ -259,7 +260,8 @@ func TestPodMonitor(t *testing.T) {
 					},
 				},
 				"endpoint": prom_v1.PodMetricsEndpoint{
-					Port: "metrics",
+					Port:        "metrics",
+					EnableHttp2: &falseVal,
 				},
 				"index":                    0,
 				"apiServer":                prom_v1.APIServerConfig{},
@@ -273,6 +275,7 @@ func TestPodMonitor(t *testing.T) {
 			},
 			expect: util.Untab(`
 				job_name: podMonitor/operator/podmonitor/0
+				enable_http2: false
 				honor_labels: false
 				kubernetes_sd_configs:
 				- role: pod
@@ -356,6 +359,11 @@ func TestProbe(t *testing.T) {
 								},
 							},
 						},
+						TLSConfig: &prom_v1.ProbeTLSConfig{
+							SafeTLSConfig: prom_v1.SafeTLSConfig{
+								InsecureSkipVerify: true,
+							},
+						},
 					},
 				},
 				"apiServer":                prom_v1.APIServerConfig{},
@@ -399,6 +407,8 @@ func TestProbe(t *testing.T) {
 					target_label: instance
 				- replacement: ""
 					target_label: __address__
+				tls_config:
+					insecure_skip_verify: true
 			`),
 		},
 	}
@@ -570,6 +580,38 @@ func TestRemoteWrite(t *testing.T) {
 				basic_auth:
 					username: secretkey
 					password_file: /var/lib/grafana-agent/secrets/_secrets_operator_obj_key
+			`),
+		},
+		{
+			name: "bearer_token",
+			input: map[string]interface{}{
+				"namespace": "operator",
+				"rw": gragent.RemoteWriteSpec{
+					URL:         "http://cortex/api/prom/push",
+					BearerToken: "my-token",
+				},
+			},
+			expect: util.Untab(`
+				url: http://cortex/api/prom/push
+				authorization:
+					type: Bearer
+					credentials: my-token
+			`),
+		},
+		{
+			name: "bearer_token_file",
+			input: map[string]interface{}{
+				"namespace": "operator",
+				"rw": gragent.RemoteWriteSpec{
+					URL:             "http://cortex/api/prom/push",
+					BearerTokenFile: "/path/to/file",
+				},
+			},
+			expect: util.Untab(`
+				url: http://cortex/api/prom/push
+				authorization:
+					type: Bearer
+					credentials_file: /path/to/file
 			`),
 		},
 		{

@@ -4,8 +4,8 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
+	"os"
 	"sort"
 	"strings"
 	"time"
@@ -50,6 +50,9 @@ const (
 
 	// defaultDecisionWait is the default time to wait for a trace before making a sampling decision
 	defaultDecisionWait = time.Second * 5
+
+	// defaultNumTraces is the default number of traces kept on memory.
+	defaultNumTraces = uint64(50000)
 
 	// defaultLoadBalancingPort is the default port the agent uses for internal load balancing
 	defaultLoadBalancingPort = "4318"
@@ -157,9 +160,14 @@ func (r *ReceiverMap) UnmarshalYAML(unmarshal func(interface{}) error) error {
 	for k := range *r {
 		if strings.HasPrefix(k, otlpReceiverName) {
 			// for http and grpc receivers, include_metadata is set to true by default
-			protocolsCfg, ok := (*r)[k].(map[interface{}]interface{})["protocols"].(map[interface{}]interface{})
+			receiverCfg, ok := (*r)[k].(map[interface{}]interface{})
 			if !ok {
 				return fmt.Errorf("failed to parse OTLP receiver config: %s", k)
+			}
+
+			protocolsCfg, ok := receiverCfg["protocols"].(map[interface{}]interface{})
+			if !ok {
+				return fmt.Errorf("otlp receiver requires a \"protocols\" field which must be a YAML map: %s", k)
 			}
 
 			for _, p := range protocols {
@@ -296,6 +304,10 @@ type SpanMetricsConfig struct {
 	MetricsInstance string `yaml:"metrics_instance"`
 	// HandlerEndpoint is the address where a prometheus exporter will be exposed
 	HandlerEndpoint string `yaml:"handler_endpoint"`
+
+	// DimensionsCacheSize defines the size of cache for storing Dimensions, which helps to avoid cache memory growing
+	// indefinitely over the lifetime of the collector.
+	DimensionsCacheSize int `yaml:"dimensions_cache_size"`
 }
 
 // tailSamplingConfig is the configuration for tail-based sampling
@@ -305,6 +317,12 @@ type tailSamplingConfig struct {
 	Policies []policy `yaml:"policies"`
 	// DecisionWait defines the time to wait for a complete trace before making a decision
 	DecisionWait time.Duration `yaml:"decision_wait,omitempty"`
+	// NumTraces is the number of traces kept on memory. Typically most of the data
+	// of a trace is released after a sampling decision is taken.
+	NumTraces uint64 `yaml:"num_traces,omitempty"`
+	// ExpectedNewTracesPerSec sets the expected number of new traces sending to the tail sampling processor
+	// per second. This helps with allocating data structures with closer to actual usage size.
+	ExpectedNewTracesPerSec uint64 `yaml:"expected_new_traces_per_sec,omitempty"`
 }
 
 type policy struct {
@@ -356,7 +374,7 @@ func exporter(rwCfg RemoteWriteConfig) (map[string]interface{}, error) {
 		password := string(rwCfg.BasicAuth.Password)
 
 		if len(rwCfg.BasicAuth.PasswordFile) > 0 {
-			buff, err := ioutil.ReadFile(rwCfg.BasicAuth.PasswordFile)
+			buff, err := os.ReadFile(rwCfg.BasicAuth.PasswordFile)
 			if err != nil {
 				return nil, fmt.Errorf("unable to load password file %s: %w", rwCfg.BasicAuth.PasswordFile, err)
 			}
@@ -565,8 +583,8 @@ func (c *InstanceConfig) otelConfig() (*config.Config, error) {
 	}
 
 	// add a hacky push receiver for when an integration
-	// wants to push traces directly, eg app agent receiver.
-	// it can only accept traces programatically from inside the agent
+	// wants to push traces directly, e.g. app agent receiver.
+	// it can only accept traces programmatically from inside the agent
 	c.Receivers[pushreceiver.TypeStr] = nil
 
 	extensions, err := c.extensions()
@@ -648,11 +666,15 @@ func (c *InstanceConfig) otelConfig() (*config.Config, error) {
 		}
 
 		processorNames = append(processorNames, "spanmetrics")
-		processors["spanmetrics"] = map[string]interface{}{
+		spanMetrics := map[string]interface{}{
 			"metrics_exporter":          exporterName,
 			"latency_histogram_buckets": c.SpanMetrics.LatencyHistogramBuckets,
 			"dimensions":                c.SpanMetrics.Dimensions,
 		}
+		if c.SpanMetrics.DimensionsCacheSize != 0 {
+			spanMetrics["dimensions_cache_size"] = c.SpanMetrics.DimensionsCacheSize
+		}
+		processors["spanmetrics"] = spanMetrics
 
 		pipelines[spanMetricsPipelineName] = map[string]interface{}{
 			"receivers": []string{noopreceiver.TypeStr},
@@ -667,6 +689,13 @@ func (c *InstanceConfig) otelConfig() (*config.Config, error) {
 	}
 
 	if c.TailSampling != nil {
+		expectedNewTracesPerSec := c.TailSampling.ExpectedNewTracesPerSec
+
+		numTraces := defaultNumTraces
+		if c.TailSampling.NumTraces != 0 {
+			numTraces = c.TailSampling.NumTraces
+		}
+
 		wait := defaultDecisionWait
 		if c.TailSampling.DecisionWait != 0 {
 			wait = c.TailSampling.DecisionWait
@@ -681,8 +710,10 @@ func (c *InstanceConfig) otelConfig() (*config.Config, error) {
 		// TODO(mario.rodriguez): put attributes processor before tail_sampling. Maybe we want to sample on mutated spans
 		processorNames = append([]string{"tail_sampling"}, processorNames...)
 		processors["tail_sampling"] = map[string]interface{}{
-			"policies":      policies,
-			"decision_wait": wait,
+			"policies":                    policies,
+			"decision_wait":               wait,
+			"num_traces":                  numTraces,
+			"expected_new_traces_per_sec": expectedNewTracesPerSec,
 		}
 	}
 
@@ -770,7 +801,7 @@ func (c *InstanceConfig) otelConfig() (*config.Config, error) {
 	}
 
 	configMap := confmap.NewFromStringMap(otelMapStructure)
-	otelCfg, err := configunmarshaler.New().Unmarshal(configMap, factories)
+	otelCfg, err := configunmarshaler.Unmarshal(configMap, factories)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load OTel config: %w", err)
 	}

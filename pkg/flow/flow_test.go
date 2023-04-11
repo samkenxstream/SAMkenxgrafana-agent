@@ -13,32 +13,32 @@ import (
 )
 
 var testFile = `
-	testcomponents "tick" "ticker" {
+	testcomponents.tick "ticker" {
 		frequency = "1s"
 	}
 
-	testcomponents "passthrough" "static" {
+	testcomponents.passthrough "static" {
 		input = "hello, world!"
 	}
 
-	testcomponents "passthrough" "ticker" {
+	testcomponents.passthrough "ticker" {
 		input = testcomponents.tick.ticker.tick_time
 	}
 
-	testcomponents "passthrough" "forwarded" {
+	testcomponents.passthrough "forwarded" {
 		input = testcomponents.passthrough.ticker.output
 	}
 `
 
 func TestController_LoadFile_Evaluation(t *testing.T) {
-	ctrl, _ := newFlow(testOptions(t))
+	ctrl := New(testOptions(t))
 
 	// Use testFile from graph_builder_test.go.
-	f, diags := ReadFile(t.Name(), []byte(testFile))
-	require.False(t, diags.HasErrors())
+	f, err := ReadFile(t.Name(), []byte(testFile))
+	require.NoError(t, err)
 	require.NotNil(t, f)
 
-	err := ctrl.LoadFile(f)
+	err = ctrl.LoadFile(f, nil)
 	require.NoError(t, err)
 	require.Len(t, ctrl.loader.Components(), 4)
 
@@ -62,11 +62,12 @@ func getFields(t *testing.T, g *dag.Graph, nodeID string) (component.Arguments, 
 func testOptions(t *testing.T) Options {
 	t.Helper()
 
-	l, err := logging.New(os.Stderr, logging.DefaultOptions)
+	s, err := logging.WriterSink(os.Stderr, logging.DefaultSinkOptions)
 	require.NoError(t, err)
 
 	return Options{
-		Logger:   l,
+		LogSink:  s,
 		DataPath: t.TempDir(),
+		Reg:      nil,
 	}
 }

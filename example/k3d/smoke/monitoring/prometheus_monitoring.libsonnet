@@ -193,11 +193,86 @@ local agent_prometheus = import 'grafana-agent/v1/lib/metrics.libsonnet';
           {
             alert: 'VultureFailures',
             expr: |||
-              (rate(tempo_vulture_error_total[2m]) / rate(tempo_vulture_trace_total[2m])) > 0 
+              (rate(tempo_vulture_error_total[5m]) / rate(tempo_vulture_trace_total[5m])) > 0.3 
             |||,
             'for': '5m',
             annotations: {
               summary: 'Vulture {{ $labels.job }} has had failures for at least 5m',
+            },
+          },
+        ],
+      },
+      {
+        name: 'CanaryChecks',
+        rules: [
+          {
+            alert: 'CanaryMissing',
+            expr: |||
+              absent(up{container="loki-canary"})  == 1
+            |||,
+            'for': '5m',
+            annotations: {
+              summary: '{{ $labels.container }} is not running.',
+            },
+          },
+          {
+            alert: 'CanaryDown',
+            expr: |||
+              up{job=~"smoke/loki-canary"} == 0
+            |||,
+            'for': '5m',
+            annotations: {
+              summary: ' Canary is down.',
+            },
+          },
+          {
+            alert: 'CanaryNotScraped',
+            expr: |||
+              rate(loki_canary_entries_total[1m]) == 0
+            |||,
+            'for': '5m',
+            annotations: {
+              summary: 'Canary is not being scraped.',
+            },
+          },
+          {
+            alert: 'CanaryMissingEntries',
+            expr: |||
+              (rate(loki_canary_missing_entries_total[2m])) > 0 
+            |||,
+            'for': '2m',
+            annotations: {
+              summary: 'Canary has had missing entries for at least 2m',
+            },
+          },
+          {
+            alert: 'CanarySpotChecksMissingEntries',
+            expr: |||
+              (rate(loki_canary_spot_check_missing_entries_total[2m])) > 0 
+            |||,
+            'for': '2m',
+            annotations: {
+              summary: 'Canary has had missing spot check entries for at least 2m',
+            },
+          },
+          {
+            alert: 'CanaryWebsocketMissingEntries',
+            expr: |||
+              (rate(loki_canary_websocket_missing_entries_total[2m])) > 0 
+            |||,
+            'for': '2m',
+            annotations: {
+              summary: 'Canary has had missing websocket entries for at least 2m',
+            },
+          },
+          {
+            alert: 'CanaryUnexpectedEntries',
+            expr: |||
+              (rate(loki_canary_unexpected_entries_total[2m])) > 0 
+            |||,
+            'for': '2m',
+            annotations: {
+              summary: 'Canary has had unexpected entries for at least 2m',
             },
           },
         ],

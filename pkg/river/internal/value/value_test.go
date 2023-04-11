@@ -2,11 +2,130 @@ package value_test
 
 import (
 	"fmt"
+	"io"
 	"testing"
 
 	"github.com/grafana/agent/pkg/river/internal/value"
 	"github.com/stretchr/testify/require"
 )
+
+// TestEncodeKeyLookup tests where Go values are retained correctly
+// throughout values with a key lookup.
+func TestEncodeKeyLookup(t *testing.T) {
+	type Body struct {
+		Data pointerMarshaler `river:"data,attr"`
+	}
+
+	tt := []struct {
+		name         string
+		encodeTarget any
+		key          string
+
+		expectBodyType  value.Type
+		expectKeyExists bool
+		expectKeyValue  value.Value
+		expectKeyType   value.Type
+	}{
+		{
+			name:            "Struct Encode data Key",
+			encodeTarget:    &Body{},
+			key:             "data",
+			expectBodyType:  value.TypeObject,
+			expectKeyExists: true,
+			expectKeyValue:  value.String("Hello, world!"),
+			expectKeyType:   value.TypeString,
+		},
+		{
+			name:            "Struct Encode Missing Key",
+			encodeTarget:    &Body{},
+			key:             "missing",
+			expectBodyType:  value.TypeObject,
+			expectKeyExists: false,
+			expectKeyValue:  value.Null,
+			expectKeyType:   value.TypeNull,
+		},
+		{
+			name:            "Map Encode data Key",
+			encodeTarget:    map[string]string{"data": "Hello, world!"},
+			key:             "data",
+			expectBodyType:  value.TypeObject,
+			expectKeyExists: true,
+			expectKeyValue:  value.String("Hello, world!"),
+			expectKeyType:   value.TypeString,
+		},
+		{
+			name:            "Map Encode Missing Key",
+			encodeTarget:    map[string]string{"data": "Hello, world!"},
+			key:             "missing",
+			expectBodyType:  value.TypeObject,
+			expectKeyExists: false,
+			expectKeyValue:  value.Null,
+			expectKeyType:   value.TypeNull,
+		},
+		{
+			name:            "Map Encode empty value Key",
+			encodeTarget:    map[string]string{"data": ""},
+			key:             "data",
+			expectBodyType:  value.TypeObject,
+			expectKeyExists: true,
+			expectKeyValue:  value.String(""),
+			expectKeyType:   value.TypeString,
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			bodyVal := value.Encode(tc.encodeTarget)
+			require.Equal(t, tc.expectBodyType, bodyVal.Type())
+
+			val, ok := bodyVal.Key(tc.key)
+			require.Equal(t, tc.expectKeyExists, ok)
+			require.Equal(t, tc.expectKeyType, val.Type())
+			switch val.Type() {
+			case value.TypeString:
+				require.Equal(t, tc.expectKeyValue.Text(), val.Text())
+			case value.TypeNull:
+				require.Equal(t, tc.expectKeyValue, val)
+			default:
+				require.Fail(t, "unexpected value type (this switch can be expanded)")
+			}
+		})
+	}
+}
+
+// TestEncodeNoKeyLookup tests where Go values are retained correctly
+// throughout values without a key lookup.
+func TestEncodeNoKeyLookup(t *testing.T) {
+	tt := []struct {
+		name         string
+		encodeTarget any
+		key          string
+
+		expectBodyType value.Type
+		expectBodyText string
+	}{
+		{
+			name:           "Encode",
+			encodeTarget:   &pointerMarshaler{},
+			expectBodyType: value.TypeString,
+			expectBodyText: "Hello, world!",
+		},
+	}
+
+	for _, tc := range tt {
+		t.Run(tc.name, func(t *testing.T) {
+			bodyVal := value.Encode(tc.encodeTarget)
+			require.Equal(t, tc.expectBodyType, bodyVal.Type())
+			require.Equal(t, "Hello, world!", bodyVal.Text())
+		})
+	}
+}
+
+type pointerMarshaler struct{}
+
+func (*pointerMarshaler) MarshalText() ([]byte, error) {
+	return []byte("Hello, world!"), nil
+}
 
 func TestValue_Call(t *testing.T) {
 	t.Run("simple", func(t *testing.T) {
@@ -107,4 +226,18 @@ func TestValue_Call(t *testing.T) {
 			require.EqualError(t, err, "function failed for a very good reason")
 		})
 	})
+}
+
+func TestValue_Interface_In_Array(t *testing.T) {
+	type Container struct {
+		Field io.Closer `river:"field,attr"`
+	}
+
+	val := value.Encode(Container{Field: io.NopCloser(nil)})
+	fieldVal, ok := val.Key("field")
+	require.True(t, ok, "field not found in object")
+	require.Equal(t, value.TypeCapsule, fieldVal.Type())
+
+	arrVal := value.Array(fieldVal)
+	require.Equal(t, value.TypeCapsule, arrVal.Index(0).Type())
 }

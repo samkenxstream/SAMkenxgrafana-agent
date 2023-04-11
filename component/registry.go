@@ -5,9 +5,10 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/go-kit/log"
+	"github.com/grafana/agent/pkg/flow/logging"
 	"github.com/grafana/regexp"
-	"github.com/hashicorp/hcl/v2"
+	"github.com/prometheus/client_golang/prometheus"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // The parsedName of a component is the parts of its name ("remote.http") split
@@ -31,9 +32,9 @@ type Options struct {
 	// components.
 	ID string
 
-	// Logger the component may use for logging. The component ID will always be
-	// set as a field.
-	Logger log.Logger
+	// Logger the component may use for logging. Logs emitted with the logger
+	// always include the component ID as a field.
+	Logger *logging.Logger
 
 	// A path to a directory with this component may use for storage. The path is
 	// guaranteed to be unique across all running components.
@@ -50,6 +51,22 @@ type Options struct {
 	// by the component; a component must use the same Exports type for its
 	// lifetime.
 	OnStateChange func(e Exports)
+
+	// Registerer allows components to add their own metrics. The registerer will
+	// come pre-wrapped with the component ID. It is not necessary for components
+	// to unregister metrics on shutdown.
+	Registerer prometheus.Registerer
+
+	// Tracer allows components to record spans. The tracer will include an
+	// attribute denoting the component ID.
+	Tracer trace.TracerProvider
+
+	// HTTPListenAddr is the address the server is configured to listen on.
+	HTTPListenAddr string
+
+	// HTTPPath is the base path that requests need in order to route to this component.
+	// Requests received by a component handler will have this already trimmed off.
+	HTTPPath string
 }
 
 // Registration describes a single component.
@@ -69,14 +86,14 @@ type Registration struct {
 	// whole process. Normally, multiple components of the same type may be
 	// created.
 	//
-	// The fully-qualified name of a component is the combination of HCL block
+	// The fully-qualified name of a component is the combination of River block
 	// name and all of its labels. Fully-qualified names must be unique across
 	// the process. Components which are *NOT* singletons automatically support
 	// user-supplied identifiers:
 	//
 	//     // Fully-qualified names: remote.s3.object-a, remote.s3.object-b
-	//     remote "s3" "object-a" { ... }
-	//     remote "s3" "object-b" { ... }
+	//     remote.s3 "object-a" { ... }
+	//     remote.s3 "object-b" { ... }
 	//
 	// This allows for multiple instances of the same component to be defined.
 	// However, components registered as a singleton do not support user-supplied
@@ -137,10 +154,6 @@ func parseComponentName(name string) (parsedName, error) {
 		return nil, fmt.Errorf("missing name")
 	}
 
-	if len(parts) > 2 {
-		return nil, fmt.Errorf("component name may only have 1 or 2 identifiers, found %d", len(parts))
-	}
-
 	for _, part := range parts {
 		if part == "" {
 			return nil, fmt.Errorf("found empty identifier")
@@ -154,22 +167,21 @@ func parseComponentName(name string) (parsedName, error) {
 	return parts, nil
 }
 
-// validatePrefixMatch validates that components that share a prefix have the
-// same length of identifiers in their names.
+// validatePrefixMatch validates that no component has a name that is solely a prefix of another.
 //
 // For example, this will return an error if both a "remote" and "remote.http"
 // component are defined.
 func validatePrefixMatch(check parsedName, against map[string]parsedName) error {
+	// add a trailing dot to each component name, so that we are always matching
+	// complete segments.
+	name := check.String() + "."
 	for _, other := range against {
-		if other[0] != check[0] {
-			continue
-		}
-
-		if len(other) != len(check) {
+		otherName := other.String() + "."
+		// if either is a prefix of the other, we have ambiguous names.
+		if strings.HasPrefix(otherName, name) || strings.HasPrefix(name, otherName) {
 			return fmt.Errorf("%q cannot be used because it is incompatible with %q", check, other)
 		}
 	}
-
 	return nil
 }
 
@@ -177,64 +189,4 @@ func validatePrefixMatch(check parsedName, against map[string]parsedName) error 
 func Get(name string) (Registration, bool) {
 	r, ok := registered[name]
 	return r, ok
-}
-
-// RegistrySchema returns an HCL body schema using all registered components.
-func RegistrySchema() *hcl.BodySchema {
-	var schema hcl.BodySchema
-
-	usedBlockSchemas := make(map[string]struct{})
-
-	for _, rc := range registered {
-		parsed := parsedNames[rc.Name]
-		if parsed == nil {
-			// This will never happen when using the exposed API, but may creep up
-			// from tests that only set registered but not parsedNames.
-			panic(rc.Name + " is missing from parsedNames map")
-		}
-
-		// The generic name of a component uses the first identifier of the
-		// component and mapping the rest of the identifiers to labels.
-		labels := labelNames(parsed, rc.Singleton)
-		genericNameList := append([]string{parsed[0]}, labels...)
-		genericName := strings.Join(genericNameList, ".")
-		if _, defined := usedBlockSchemas[genericName]; defined {
-			// Ignore blocks that were already added. This will happen when
-			// processing a component for "remote.http" and "remote.s3", since both
-			// of them are injected into the schema as "remote.kind.name".
-			continue
-		}
-		usedBlockSchemas[genericName] = struct{}{}
-
-		schema.Blocks = append(schema.Blocks, hcl.BlockHeaderSchema{
-			Type:       parsed[0],
-			LabelNames: labels,
-		})
-	}
-
-	return &schema
-}
-
-func labelNames(in parsedName, singleton bool) []string {
-	if singleton {
-		// Component does *NOT* support a user-supplied identifier.
-		switch len(in) {
-		case 1:
-			return []string{}
-		case 2:
-			return []string{"kind"}
-		default:
-			panic("Unexpected component name " + in.String())
-		}
-	}
-
-	// Component supports a user-supplied identifier.
-	switch len(in) {
-	case 1:
-		return []string{"name"}
-	case 2:
-		return []string{"kind", "name"}
-	default:
-		panic("Unexpected component name " + in.String())
-	}
 }

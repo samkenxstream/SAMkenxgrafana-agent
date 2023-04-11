@@ -32,7 +32,7 @@ type snmpHandler struct {
 
 func (sh *snmpHandler) Targets(ep integrations.Endpoint) []*targetgroup.Group {
 	integrationNameValue := model.LabelValue("integrations/" + sh.cfg.Name())
-	key, _ := sh.cfg.InstanceKey("")
+	key, _ := sh.cfg.Identifier(sh.cfg.globals)
 
 	group := &targetgroup.Group{
 		Labels: model.LabelSet{
@@ -53,12 +53,26 @@ func (sh *snmpHandler) Targets(ep integrations.Endpoint) []*targetgroup.Group {
 	}
 
 	for _, t := range sh.cfg.SnmpTargets {
-		group.Targets = append(group.Targets, model.LabelSet{
+		labelSet := model.LabelSet{
 			model.AddressLabel:     model.LabelValue(ep.Host),
 			model.MetricsPathLabel: model.LabelValue(path.Join(ep.Prefix, "metrics")),
 			"snmp_target":          model.LabelValue(t.Target),
 			"__param_target":       model.LabelValue(t.Target),
-		})
+		}
+
+		if t.Module != "" {
+			labelSet = labelSet.Merge(model.LabelSet{
+				"__param_module": model.LabelValue(t.Module),
+			})
+		}
+
+		if t.WalkParams != "" {
+			labelSet = labelSet.Merge(model.LabelSet{
+				"__param_walk_params": model.LabelValue(t.WalkParams),
+			})
+		}
+
+		group.Targets = append(group.Targets, labelSet)
 	}
 
 	return []*targetgroup.Group{group}

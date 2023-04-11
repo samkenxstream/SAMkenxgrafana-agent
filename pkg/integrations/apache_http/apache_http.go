@@ -2,7 +2,6 @@
 package apache_http //nolint:golint
 
 import (
-	"fmt"
 	"net/url"
 
 	ae "github.com/Lusitaniae/apache_exporter/collector"
@@ -44,7 +43,7 @@ func (c *Config) InstanceKey(agentKey string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	return fmt.Sprintf("%s:%s", u.Hostname(), u.Port()), nil
+	return u.Host, nil
 }
 
 // NewIntegration converts the config into an integration instance.
@@ -57,7 +56,7 @@ func init() {
 }
 
 // New creates a new apache_http integration. The integration scrapes metrics
-// from a Apache HTTP server.
+// from an Apache HTTP server.
 func New(logger log.Logger, c *Config) (integrations.Integration, error) {
 	conf := &ae.Config{
 		ScrapeURI:    c.ApacheAddr,

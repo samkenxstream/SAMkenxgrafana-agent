@@ -4,7 +4,9 @@ import (
 	"fmt"
 
 	"github.com/prometheus/prometheus/model/exemplar"
+	"github.com/prometheus/prometheus/model/histogram"
 	"github.com/prometheus/prometheus/model/labels"
+	"github.com/prometheus/prometheus/model/metadata"
 	"github.com/prometheus/prometheus/storage"
 )
 
@@ -28,5 +30,13 @@ func (fa *failedAppender) Rollback() error {
 }
 
 func (fa *failedAppender) AppendExemplar(ref storage.SeriesRef, l labels.Labels, e exemplar.Exemplar) (storage.SeriesRef, error) {
+	return 0, fmt.Errorf("no such instance %s", fa.instanceName)
+}
+
+func (fa *failedAppender) UpdateMetadata(ref storage.SeriesRef, l labels.Labels, m metadata.Metadata) (storage.SeriesRef, error) {
+	return 0, fmt.Errorf("no such instance %s", fa.instanceName)
+}
+
+func (fa *failedAppender) AppendHistogram(ref storage.SeriesRef, l labels.Labels, t int64, h *histogram.Histogram, fh *histogram.FloatHistogram) (storage.SeriesRef, error) {
 	return 0, fmt.Errorf("no such instance %s", fa.instanceName)
 }

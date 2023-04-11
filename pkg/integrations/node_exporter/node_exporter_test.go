@@ -5,7 +5,6 @@ package node_exporter //nolint:golint
 
 import (
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
 	"runtime"
@@ -42,7 +41,7 @@ func TestNodeExporter(t *testing.T) {
 	}
 	cfg.DisableCollectors = []string{CollectorPerf, CollectorBuddyInfo}
 
-	// Check that the flags convert and the integration initiailizes
+	// Check that the flags convert and the integration initializes
 	logger := log.NewNopLogger()
 	integration, err := New(logger, &cfg)
 	require.NoError(t, err, "failed to setup node_exporter")
@@ -59,7 +58,7 @@ func TestNodeExporter(t *testing.T) {
 	res, err := http.Get(srv.URL + "/metrics")
 	require.NoError(t, err)
 
-	body, err := ioutil.ReadAll(res.Body)
+	body, err := io.ReadAll(res.Body)
 	require.NoError(t, err)
 
 	p := textparse.NewPromParser(body)
@@ -95,7 +94,6 @@ func TestNodeExporter_IgnoredFlags(t *testing.T) {
 			"collector.cpu.guest",
 			"collector.cpu.info.flags-include",
 			"collector.cpu.info.bugs-include",
-			"collector.diskstats.ignored-devices",
 			"collector.filesystem.mount-timeout",
 		}
 	}

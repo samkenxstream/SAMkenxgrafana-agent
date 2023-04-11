@@ -12,6 +12,7 @@ import (
 	"github.com/grafana/agent/pkg/server"
 	"github.com/grafana/agent/pkg/util"
 	"github.com/prometheus/statsd_exporter/pkg/level"
+	"golang.org/x/exp/maps"
 	"gopkg.in/yaml.v2"
 )
 
@@ -23,9 +24,12 @@ const (
 )
 
 // DefaultVersionedIntegrations is the default config for integrations.
-var DefaultVersionedIntegrations = VersionedIntegrations{
-	version:  integrationsVersion1,
-	configV1: &v1.DefaultManagerConfig,
+func DefaultVersionedIntegrations() VersionedIntegrations {
+	configV1 := v1.DefaultManagerConfig()
+	return VersionedIntegrations{
+		version:  integrationsVersion1,
+		configV1: &configV1,
+	}
 }
 
 // VersionedIntegrations abstracts the subsystem configs for integrations v1
@@ -62,7 +66,8 @@ func (c VersionedIntegrations) MarshalYAML() (interface{}, error) {
 	case c.configV2 != nil:
 		return c.configV2, nil
 	default:
-		return c.raw, nil
+		// A pointer is needed for the yaml.Marshaler implementation to work.
+		return &c.raw, nil
 	}
 }
 
@@ -93,12 +98,19 @@ func (c *VersionedIntegrations) setVersion(v integrationsVersion) error {
 
 	switch c.version {
 	case integrationsVersion1:
-		cfg := v1.DefaultManagerConfig
+		// Do not overwrite the config if it's already been set. This is relevant for
+		// cases where the config has already been loaded via other means (example: Agent
+		// Management snippets).
+		if c.configV1 != nil {
+			return nil
+		}
+
+		cfg := v1.DefaultManagerConfig()
 		c.configV1 = &cfg
 		return yaml.UnmarshalStrict(c.raw, c.configV1)
 	case integrationsVersion2:
 		cfg := v2.DefaultSubsystemOptions
-		// this is needed for dynamic configuration, the unmarshal doesnt work correctly if
+		// this is needed for dynamic configuration, the unmarshal doesn't work correctly if
 		// this is not nil.
 		c.configV1 = nil
 		c.configV2 = &cfg
@@ -111,6 +123,22 @@ func (c *VersionedIntegrations) setVersion(v integrationsVersion) error {
 	default:
 		panic(fmt.Sprintf("unknown integrations version %d", c.version))
 	}
+}
+
+// EnabledIntegrations returns a slice of enabled integrations
+func (c *VersionedIntegrations) EnabledIntegrations() []string {
+	integrations := map[string]struct{}{}
+	if c.configV1 != nil {
+		for _, integration := range c.configV1.Integrations {
+			integrations[integration.Name()] = struct{}{}
+		}
+	}
+	if c.configV2 != nil {
+		for _, integration := range c.configV2.Configs {
+			integrations[integration.Name()] = struct{}{}
+		}
+	}
+	return maps.Keys(integrations)
 }
 
 // IntegrationsGlobals is a global struct shared across integrations.

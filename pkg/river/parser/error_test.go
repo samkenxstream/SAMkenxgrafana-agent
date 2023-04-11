@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/grafana/agent/pkg/river/diag"
 	"github.com/grafana/agent/pkg/river/scanner"
 	"github.com/grafana/agent/pkg/river/token"
 	"github.com/stretchr/testify/assert"
@@ -18,7 +19,7 @@ import (
 // messages expected in the test files.
 //
 // Expected errors are indicated in the test files by putting a comment of the
-// form /* ERROR "rx" */ immediately folloing an offending token. The harness
+// form /* ERROR "rx" */ immediately following an offending token. The harness
 // will verify that an error matching the regular expression rx is reported at
 // that source position.
 
@@ -80,13 +81,13 @@ func isLiteral(t token.Token) bool {
 	return false
 }
 
-// compareErrors compes the map of expected error messages with the list of
+// compareErrors compares the map of expected error messages with the list of
 // found errors and reports mismatches.
-func compareErrors(t *testing.T, file *token.File, expected map[token.Pos]string, found ErrorList) {
+func compareErrors(t *testing.T, file *token.File, expected map[token.Pos]string, found diag.Diagnostics) {
 	t.Helper()
 
 	for _, checkError := range found {
-		pos := file.Pos(checkError.Position.Offset)
+		pos := file.Pos(checkError.StartPos.Offset)
 
 		if msg, found := expected[pos]; found {
 			// We expect a message at pos; check if it matches
@@ -97,13 +98,13 @@ func compareErrors(t *testing.T, file *token.File, expected map[token.Pos]string
 			assert.True(t,
 				rx.MatchString(checkError.Message),
 				"%s: %q does not match %q",
-				checkError.Position, checkError.Message, msg,
+				checkError.StartPos, checkError.Message, msg,
 			)
 			delete(expected, pos) // Eliminate consumed error
 		} else {
 			assert.Fail(t,
 				"Unexpected error",
-				"unexpected error: %s: %s", checkError.Position.String(), checkError.Message,
+				"unexpected error: %s: %s", checkError.StartPos.String(), checkError.Message,
 			)
 		}
 	}
@@ -123,7 +124,7 @@ func TestErrors(t *testing.T) {
 
 	for _, d := range list {
 		name := d.Name()
-		if d.IsDir() || !strings.HasSuffix(name, ".rvr") {
+		if d.IsDir() || !strings.HasSuffix(name, ".river") {
 			continue
 		}
 
@@ -143,5 +144,5 @@ func checkErrors(t *testing.T, filename string) {
 	_ = p.ParseFile()
 
 	expected := expectedErrors(p.file, src)
-	compareErrors(t, p.file, expected, p.errors)
+	compareErrors(t, p.file, expected, p.diags)
 }

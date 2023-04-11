@@ -1,6 +1,10 @@
 package value
 
-import "reflect"
+import (
+	"reflect"
+
+	"github.com/grafana/agent/pkg/river/internal/reflectutil"
+)
 
 // structWrapper allows for partially traversing structs which contain fields
 // representing blocks. This is required due to how block names and labels
@@ -9,7 +13,7 @@ import "reflect"
 // If a block name is a.b.c, then it is represented as three nested objects:
 //
 //	{
-// 	  a = {
+//	  a = {
 //	    b = {
 //	      c = { /* block contents */ },
 //	    },
@@ -40,7 +44,7 @@ func wrapStruct(val reflect.Value, keepLabel bool) structWrapper {
 
 	var label string
 	if f, ok := fields.LabelField(); ok && keepLabel {
-		label = val.FieldByIndex(f.Index).String()
+		label = reflectutil.Get(val, f).String()
 	}
 
 	return structWrapper{

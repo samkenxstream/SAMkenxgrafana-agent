@@ -74,17 +74,16 @@ spec:
     spec:
       containers:
       - args:
+        - -config.expand-env=true
         - -config.file=/etc/agent/agent.yaml
         - -enable-features=integrations-next
         - -server.http.address=0.0.0.0:80
-        command:
-        - /bin/agent
         env:
         - name: HOSTNAME
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        image: grafana/agent:v0.26.1
+        image: grafana/agent:v0.32.1
         imagePullPolicy: IfNotPresent
         name: grafana-agent
         ports:
@@ -95,7 +94,7 @@ spec:
           name: agent-wal
         - mountPath: /etc/agent
           name: grafana-agent
-      serviceAccount: grafana-agent
+      serviceAccountName: grafana-agent
       volumes:
       - configMap:
           name: grafana-agent

@@ -6,9 +6,45 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"reflect"
+	"strings"
 
+	"github.com/grafana/agent/pkg/river/internal/reflectutil"
+	"github.com/grafana/agent/pkg/river/internal/rivertags"
 	"github.com/grafana/agent/pkg/river/token"
 )
+
+// An Expr represents a single River expression.
+type Expr struct {
+	rawTokens []Token
+}
+
+// NewExpr creates a new Expr.
+func NewExpr() *Expr { return &Expr{} }
+
+// Tokens returns the Expr as a set of Tokens.
+func (e *Expr) Tokens() []Token { return e.rawTokens }
+
+// SetValue sets the Expr to a River value converted from a Go value. The Go
+// value is encoded using the normal Go to River encoding rules. If any value
+// reachable from goValue implements Tokenizer, the printed tokens will instead
+// be retrieved by calling the RiverTokenize method.
+func (e *Expr) SetValue(goValue interface{}) {
+	e.rawTokens = tokenEncode(goValue)
+}
+
+// WriteTo renders and formats the File, writing the contents to w.
+func (e *Expr) WriteTo(w io.Writer) (int64, error) {
+	n, err := printExprTokens(w, e.Tokens())
+	return int64(n), err
+}
+
+// Bytes renders the File to a formatted byte slice.
+func (e *Expr) Bytes() []byte {
+	var buf bytes.Buffer
+	_, _ = e.WriteTo(&buf)
+	return buf.Bytes()
+}
 
 // A File represents a River configuration file.
 type File struct {
@@ -26,7 +62,7 @@ func (f *File) Body() *Body { return f.body }
 
 // WriteTo renders and formats the File, writing the contents to w.
 func (f *File) WriteTo(w io.Writer) (int64, error) {
-	n, err := printTokens(w, f.Tokens())
+	n, err := printFileTokens(w, f.Tokens())
 	return int64(n), err
 }
 
@@ -71,7 +107,7 @@ func (b *Body) Tokens() []Token {
 	return rawToks
 }
 
-// AppendTokens appens raw tokens to the Body.
+// AppendTokens appends raw tokens to the Body.
 func (b *Body) AppendTokens(tokens []Token) {
 	b.nodes = append(b.nodes, tokensSlice(tokens))
 }
@@ -79,6 +115,146 @@ func (b *Body) AppendTokens(tokens []Token) {
 // AppendBlock adds a new block inside of the Body.
 func (b *Body) AppendBlock(block *Block) {
 	b.nodes = append(b.nodes, block)
+}
+
+// AppendFrom sets attributes and appends blocks defined by goValue into the
+// Body. If any value reachable from goValue implements Tokenizer, the printed
+// tokens will instead be retrieved by calling the RiverTokenize method.
+//
+// goValue must be a struct or a pointer to a struct that contains River struct
+// tags.
+func (b *Body) AppendFrom(goValue interface{}) {
+	if goValue == nil {
+		return
+	}
+
+	rv := reflect.ValueOf(goValue)
+	b.encodeFields(rv)
+}
+
+// getBlockLabel returns the label for a given block.
+func getBlockLabel(rv reflect.Value) string {
+	tags := rivertags.Get(rv.Type())
+	for _, tag := range tags {
+		if tag.Flags&rivertags.FlagLabel != 0 {
+			return reflectutil.Get(rv, tag).String()
+		}
+	}
+
+	return ""
+}
+
+func (b *Body) encodeFields(rv reflect.Value) {
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
+		panic(fmt.Sprintf("river/token/builder: can only encode struct values to bodies, got %s", rv.Type()))
+	}
+
+	fields := rivertags.Get(rv.Type())
+
+	for _, field := range fields {
+		fieldVal := reflectutil.Get(rv, field)
+		b.encodeField(nil, field, fieldVal)
+	}
+}
+
+func (b *Body) encodeField(prefix []string, field rivertags.Field, fieldValue reflect.Value) {
+	fieldName := strings.Join(field.Name, ".")
+
+	for fieldValue.Kind() == reflect.Pointer {
+		if fieldValue.IsNil() {
+			break
+		}
+		fieldValue = fieldValue.Elem()
+	}
+	if field.Flags&rivertags.FlagOptional != 0 && fieldValue.IsZero() {
+		return
+	}
+
+	switch {
+	case field.IsAttr():
+		b.SetAttributeValue(fieldName, fieldValue.Interface())
+
+	case field.IsBlock():
+		fullName := mergeStringSlice(prefix, field.Name)
+
+		switch {
+		case fieldValue.IsZero():
+			// It shouldn't be possible to have a required block which is unset, but
+			// we'll encode something anyway.
+			inner := NewBlock(fullName, "")
+			b.AppendBlock(inner)
+
+		case fieldValue.Kind() == reflect.Slice, fieldValue.Kind() == reflect.Array:
+			for i := 0; i < fieldValue.Len(); i++ {
+				elem := fieldValue.Index(i)
+
+				// Recursively call encodeField for each element in the slice/array.
+				// The recursive call will hit the case below and add a new block for
+				// each field encountered.
+				b.encodeField(prefix, field, elem)
+			}
+
+		case fieldValue.Kind() == reflect.Struct:
+			inner := NewBlock(fullName, getBlockLabel(fieldValue))
+			inner.Body().encodeFields(fieldValue)
+			b.AppendBlock(inner)
+		}
+
+	case field.IsEnum():
+		// Blocks within an enum have a prefix set.
+		newPrefix := mergeStringSlice(prefix, field.Name)
+
+		switch {
+		case fieldValue.Kind() == reflect.Slice, fieldValue.Kind() == reflect.Array:
+			for i := 0; i < fieldValue.Len(); i++ {
+				b.encodeEnumElement(newPrefix, fieldValue.Index(i))
+			}
+
+		default:
+			panic(fmt.Sprintf("river/token/builder: unrecognized enum kind %s", fieldValue.Kind()))
+		}
+	}
+}
+
+func mergeStringSlice(a, b []string) []string {
+	if len(a) == 0 {
+		return b
+	} else if len(b) == 0 {
+		return a
+	}
+
+	res := make([]string, 0, len(a)+len(b))
+	res = append(res, a...)
+	res = append(res, b...)
+	return res
+}
+
+func (b *Body) encodeEnumElement(prefix []string, enumElement reflect.Value) {
+	for enumElement.Kind() == reflect.Pointer {
+		if enumElement.IsNil() {
+			return
+		}
+		enumElement = enumElement.Elem()
+	}
+
+	fields := rivertags.Get(enumElement.Type())
+
+	// Find the first non-zero field and encode it.
+	for _, field := range fields {
+		fieldVal := reflectutil.Get(enumElement, field)
+		if !fieldVal.IsValid() || fieldVal.IsZero() {
+			continue
+		}
+
+		b.encodeField(prefix, field, fieldVal)
+		break
+	}
 }
 
 // SetAttributeTokens sets an attribute to the Body whose value is a set of raw

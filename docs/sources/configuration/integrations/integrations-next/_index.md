@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/configuration/integrations/integrations-next/
 title: Integrations Revamp
 weight: 100
 ---
@@ -33,7 +31,7 @@ original subsystem:
 
 * A new service discovery HTTP API is included. This can be used with
   Prometheus' [http_sd_config][http_sd_config]. The API returns extra labels
-  for integrations that previously were only availble when autoscraping, such
+  for integrations that previously were only available when autoscraping, such
   as `agent_hostname`.
 
 * Integrations that aren't Prometheus exporters may now be added, such as
@@ -81,7 +79,7 @@ integrations:
   [windows: <windows_exporter_config>]
   [eventhandler: <eventhandler_config>]
   [snmp: <snmp_exporter_config>]
-  [ebpf: <ebpf_config>]
+  [blackbox: <blackbox_config>]
 
   # Configs for integrations that do support multiple instances. Note that
   # these must be arrays.
@@ -106,8 +104,14 @@ integrations:
   mongodb_configs:
     [- <mongodb_exporter_config> ...]
 
+  mssql_configs:
+    [- <mssql_config> ...]
+
   mysql_configs:
     [- <mysqld_exporter_config> ...]
+  
+  oracledb_configs:
+    [ - <oracledb_exporter_config> ...]
 
   postgres_configs:
     [- <postgres_exporter_config> ...]
@@ -115,11 +119,17 @@ integrations:
   redis_configs:
     [- <redis_exporter_config> ...]
 
+  snowflake_configs:
+    [- <snowflake_config> ...]
+
   app_agent_receiver_configs:
     [- <app_agent_receiver_config>]
 
   apache_http_configs:
     [- <apache_http_config>]
+
+  vsphere_configs:
+    [- <vsphere_config>]
 ```
 
 Note that most integrations are no longer configured with the `_exporter` name.

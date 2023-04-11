@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/configuration/integrations/windows-exporter-config/
 title: windows_exporter_config
 ---
 
@@ -52,15 +50,12 @@ Full reference of options:
   # How frequent to truncate the WAL for this integration.
   [wal_truncate_frequency: <duration> | default = "60m"]
 
-  # Monitor the exporter itself and include those metrics in the results.
-  [include_exporter_metrics: <bool> | default = false]
-
   #
   # Exporter-specific configuration options
   #
 
   # List of collectors to enable. Any non-experimental collector from the
-  # embeded version of windows_exporter can be enabeld here.
+  # embedded version of windows_exporter can be enabled here.
   [enabled_collectors: <string> | default = "cpu,cs,logical_disk,net,os,service,system,textfile"]
 
   # Settings for collectors which accept configuration. Settings specified here

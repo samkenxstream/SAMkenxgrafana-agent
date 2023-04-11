@@ -1,6 +1,4 @@
 ---
-aliases:
-- /docs/agent/latest/configuration/integrations/mongodb_exporter-config/
 title: mongodb_exporter_config
 ---
 
@@ -67,9 +65,6 @@ Besides that, there's not much to configure. Please refer to the full reference 
 
   # How frequent to truncate the WAL for this integration.
   [wal_truncate_frequency: <duration> | default = "60m"]
-
-  # Monitor the exporter itself and include those metrics in the results.
-  [include_exporter_metrics: <bool> | default = false]
 
   #
   # Exporter-specific configuration options

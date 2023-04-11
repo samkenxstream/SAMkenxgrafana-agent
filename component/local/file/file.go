@@ -8,11 +8,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/go-kit/log/level"
 	"github.com/grafana/agent/component"
-	"github.com/grafana/agent/pkg/flow/hcltypes"
-	"github.com/hashicorp/hcl/v2"
-	"github.com/rfratto/gohcl"
+	"github.com/grafana/agent/pkg/flow/rivertypes"
+	"github.com/grafana/agent/pkg/river"
 )
 
 // waitReadPeriod holds the time to wait before reading a file while the
@@ -37,15 +38,15 @@ func init() {
 // Arguments holds values which are used to configure the local.file component.
 type Arguments struct {
 	// Filename indicates the file to watch.
-	Filename string `hcl:"filename,attr"`
+	Filename string `river:"filename,attr"`
 	// Type indicates how to detect changes to the file.
-	Type Detector `hcl:"detector,optional"`
+	Type Detector `river:"detector,attr,optional"`
 	// PollFrequency determines the frequency to check for changes when Type is
 	// UpdateTypePoll.
-	PollFrequency time.Duration `hcl:"poll_freqency,optional"`
+	PollFrequency time.Duration `river:"poll_freqency,attr,optional"`
 	// IsSecret marks the file as holding a secret value which should not be
 	// displayed to the user.
-	IsSecret bool `hcl:"is_secret,optional"`
+	IsSecret bool `river:"is_secret,attr,optional"`
 }
 
 // DefaultArguments provides the default arguments for the local.file
@@ -55,20 +56,20 @@ var DefaultArguments = Arguments{
 	PollFrequency: time.Minute,
 }
 
-var _ gohcl.Decoder = (*Arguments)(nil)
+var _ river.Unmarshaler = (*Arguments)(nil)
 
-// DecodeHCL implements gohcl.Decoder.
-func (a *Arguments) DecodeHCL(body hcl.Body, ctx *hcl.EvalContext) error {
+// UnmarshalRiver implements river.Unmarshaler.
+func (a *Arguments) UnmarshalRiver(f func(interface{}) error) error {
 	*a = DefaultArguments
 
 	type arguments Arguments
-	return gohcl.DecodeBody(body, ctx, (*arguments)(a))
+	return f((*arguments)(a))
 }
 
 // Exports holds values which are exported by the local.file component.
 type Exports struct {
 	// Content of the file.
-	Content *hcltypes.OptionalSecret `hcl:"content,attr"`
+	Content rivertypes.OptionalSecret `river:"content,attr"`
 }
 
 // Component implements the local.file component.
@@ -85,7 +86,8 @@ type Component struct {
 
 	// reloadCh is a buffered channel which is written to when the watched file
 	// should be reloaded by the component.
-	reloadCh chan struct{}
+	reloadCh     chan struct{}
+	lastAccessed prometheus.Gauge
 }
 
 var (
@@ -99,11 +101,19 @@ func New(o component.Options, args Arguments) (*Component, error) {
 		opts: o,
 
 		reloadCh: make(chan struct{}, 1),
+		lastAccessed: prometheus.NewGauge(prometheus.GaugeOpts{
+			Name: "agent_local_file_timestamp_last_accessed_unix_seconds",
+			Help: "The last successful access in unix seconds",
+		}),
 	}
 
+	err := o.Registerer.Register(c.lastAccessed)
+	if err != nil {
+		return nil, err
+	}
 	// Perform an update which will immediately set our exports to the initial
 	// contents of the file.
-	if err := c.Update(args); err != nil {
+	if err = c.Update(args); err != nil {
 		return nil, err
 	}
 	return c, nil
@@ -163,9 +173,10 @@ func (c *Component) readFile() error {
 		return err
 	}
 	c.latestContent = string(bb)
+	c.lastAccessed.SetToCurrentTime()
 
 	c.opts.OnStateChange(Exports{
-		Content: &hcltypes.OptionalSecret{
+		Content: rivertypes.OptionalSecret{
 			IsSecret: c.args.IsSecret,
 			Value:    c.latestContent,
 		},
@@ -179,7 +190,7 @@ func (c *Component) readFile() error {
 	return nil
 }
 
-// Update implements component.Compnoent.
+// Update implements component.Component.
 func (c *Component) Update(args component.Arguments) error {
 	newArgs := args.(Arguments)
 
